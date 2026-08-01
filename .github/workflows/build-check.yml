@@ -8,6 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 发布 Release 需要写权限
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,3 +88,24 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rikkahub-debug-apks
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      # 发布为 Prerelease，提供公开直链下载（无需登录）
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          tag_name: subagent-build
+          name: RikkaHub Subagent Build
+          prerelease: true
+          body: |
+            RikkaHub + Subagent 扩展构建（commit `${{ github.sha }}`）
+
+            > ⚠️ 开发版本，可能不稳定，仅供测试。子代理功能：扩展管理 → 子代理。
+          files: app/build/outputs/apk/debug/*.apk
