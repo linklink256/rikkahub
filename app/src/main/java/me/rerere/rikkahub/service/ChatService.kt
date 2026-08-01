@@ -46,12 +46,15 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.data.ai.subagent.SubagentRunner
+import me.rerere.rikkahub.data.ai.subagent.createSubagentTool
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.files.SkillManager
+import me.rerere.rikkahub.data.files.SubagentManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
@@ -87,6 +90,7 @@ import me.rerere.workspace.WorkspaceShellStatus
 import java.time.Instant
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
@@ -151,6 +155,10 @@ class ChatService(
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
+
+    // 子代理：SubagentManager / SubagentRunner 无状态，可安全 lazy 创建
+    private val subagentManager by lazy { SubagentManager(context, settingsStore) }
+    private val subagentRunner by lazy { SubagentRunner(providerManager) }
 
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -474,6 +482,9 @@ class ChatService(
             ?: settings.getCurrentAssistant()
         val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId) ?: return
 
+        // 子代理工具需要延迟读取当前会话的完整工具池
+        val toolPoolRef = AtomicReference<List<Tool>>(emptyList())
+
         val senderName = if (assistant.useAssistantAvatar) {
             assistant.name.ifEmpty { context.getString(R.string.assistant_page_default_assistant) }
         } else {
@@ -576,7 +587,19 @@ class ChatService(
                             )
                         )
                     }
-                },
+                    // 安装子代理角色后即向主 agent 暴露 subagent 工具（与 pi 一致）
+                    if (runCatching { subagentManager.listSubagents().isNotEmpty() }.getOrDefault(false)) {
+                        add(
+                            createSubagentTool(
+                                subagentManager = subagentManager,
+                                subagentRunner = subagentRunner,
+                                settingsStore = settingsStore,
+                                toolPoolProvider = { toolPoolRef.get() },
+                                model = model,
+                            )
+                        )
+                    }
+                }.also { toolPoolRef.set(it) },
             ).onCompletion {
                 // 可能被取消了，或者意外结束，兜底更新
                 val updatedConversation = getConversationFlow(conversationId).value.copy(
