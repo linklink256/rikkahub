@@ -32,6 +32,7 @@ class SubagentManager(
 ) {
     companion object {
         private const val TAG = "SubagentManager"
+        private const val DEFAULT_MAX_ITERATIONS = 10
     }
 
     fun getAgentsDir(): File {
@@ -186,8 +187,6 @@ class SubagentManager(
             null
         }
     }
-
-    private const val DEFAULT_MAX_ITERATIONS = 10
 }
 
 data class SubagentMetadata(
