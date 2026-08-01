@@ -46,7 +46,7 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
 
       # 仓库不含 google-services.json（Firebase 配置在原作者 secrets 中），
-      # 此处写入占位配置以满足 google-services 插件，仅用于编译验证。
+      # 此处写入占位配置以满足 google-services 插件（需匹配 debug 包名），仅用于编译验证。
       - name: Prepare placeholder google-services.json
         run: |
           cat > app/google-services.json << 'EOF'
@@ -56,7 +56,28 @@ jobs:
               "project_id": "rikkahub-build-check",
               "storage_bucket": "rikkahub-build-check.appspot.com"
             },
-            "client": []
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+                  "android_client_info": {
+                    "package_name": "me.rerere.rikkahub.debug"
+                  },
+                  "client_id": "android:me.rerere.rikkahub.debug"
+                },
+                "oauth_client": [],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": []
+                  }
+                }
+              }
+            ]
           }
           EOF
 
