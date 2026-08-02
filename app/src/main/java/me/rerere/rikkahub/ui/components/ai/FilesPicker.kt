@@ -179,7 +179,8 @@ internal fun FilesPicker(
         val activeCount =
             assistant.quickMessageIds.size +
                 modeAndLorebookCount +
-                assistant.enabledSkills.size
+                assistant.enabledSkills.size +
+                assistant.enabledSubagents.size
         ListItem(
             leadingContent = {
                 Icon(
@@ -426,6 +427,10 @@ private fun InjectionQuickConfigSheet(
                 onNavigateToSkills = {
                     onDismissAll()
                     navController.navigate(Screen.Skills)
+                },
+                onNavigateToSubagents = {
+                    onDismissAll()
+                    navController.navigate(Screen.Subagents)
                 })
 
             Spacer(modifier = Modifier.height(16.dp))
