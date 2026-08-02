@@ -47,6 +47,7 @@ import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.subagent.SubagentRunner
+import me.rerere.rikkahub.data.ai.subagent.createSubagentManagementTools
 import me.rerere.rikkahub.data.ai.subagent.createSubagentTool
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
@@ -587,7 +588,10 @@ class ChatService(
                             )
                         )
                     }
-                    // 安装子代理角色后即向主 agent 暴露 subagent 工具（与 pi 一致）
+                    // 子代理管理工具始终可用：主 agent 可自行创建/删除角色（类似 skills）
+                    addAll(createSubagentManagementTools(subagentManager))
+
+                    // 委派工具：安装子代理角色后可用
                     if (runCatching { subagentManager.listSubagents().isNotEmpty() }.getOrDefault(false)) {
                         add(
                             createSubagentTool(
