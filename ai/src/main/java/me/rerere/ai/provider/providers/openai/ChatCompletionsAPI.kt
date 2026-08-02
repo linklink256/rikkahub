@@ -633,7 +633,7 @@ class ChatCompletionsAPI(
                                 put("arguments", tool.inputAsJson().toString())
                             })
                         })
-                    })
+                    }
                 })
             }
         }
