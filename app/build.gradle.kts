@@ -19,11 +19,11 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "me.rerere.rikkahub"
+        applicationId = "me.rerere.rikkahub.subagent"
         minSdk = 26
         targetSdk = 37
         versionCode = 172
-        versionName = "2.4.5"
+        versionName = "2.4.5-subagent"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
