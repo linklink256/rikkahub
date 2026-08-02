@@ -17,7 +17,7 @@ import me.rerere.rikkahub.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-private const val API_URL = "https://updates.rikka-ai.com/"
+private const val API_URL = "https://api.github.com/repos/linklink256/rikkahub/releases"
 
 class UpdateChecker(private val client: OkHttpClient) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -38,9 +38,28 @@ class UpdateChecker(private val client: OkHttpClient) {
                             .build()
                     ).await()
                     if (response.isSuccessful) {
-                        json.decodeFromString<UpdateInfo>(response.body.string())
+                        // GitHub Releases API 返回数组（最新在前），取第一个（含 prerelease）
+                        val releases = json.decodeFromString<List<GitHubRelease>>(response.body.string())
+                        val release = releases.firstOrNull()
+                            ?: throw Exception("No releases found")
+                        val version = release.tag_name.removePrefix("v")
+                        val downloads = release.assets
+                            .filter { it.name.endsWith(".apk", ignoreCase = true) }
+                            .map { asset ->
+                                UpdateDownload(
+                                    name = asset.name,
+                                    url = asset.browser_download_url,
+                                    size = asset.size.toString()
+                                )
+                            }
+                        UpdateInfo(
+                            version = version,
+                            publishedAt = release.published_at,
+                            changelog = release.body.orEmpty(),
+                            downloads = downloads
+                        )
                     } else {
-                        throw Exception("Failed to fetch update info")
+                        throw Exception("Failed to fetch update info (HTTP ${response.code})")
                     }
                 } catch (e: Exception) {
                     throw Exception("Failed to fetch update info", e)
@@ -90,6 +109,22 @@ data class UpdateInfo(
     val publishedAt: String,
     val changelog: String,
     val downloads: List<UpdateDownload>
+)
+
+/** GitHub Releases API 响应（数组元素） */
+@Serializable
+private data class GitHubRelease(
+    val tag_name: String = "",
+    val body: String? = null,
+    val published_at: String = "",
+    val assets: List<GitHubAsset> = emptyList(),
+)
+
+@Serializable
+private data class GitHubAsset(
+    val name: String = "",
+    val browser_download_url: String = "",
+    val size: Long = 0,
 )
 
 /**
