@@ -178,7 +178,11 @@ class SubagentRunner(
                 }
             }
         }
-        return parentModel
+        // 配置的模型不存在时明确报错，而不是静默回退到主模型，避免用户误以为配置已生效
+        error(
+            "Subagent '${definition.name}' 指定的模型 '$modelName' 未配置。请检查 AGENT.md 的 model 字段，" +
+                "或在设置中添加该模型；清空 model 字段则继承主 agent 模型。"
+        )
     }
 
     private fun buildSystemPrompt(
