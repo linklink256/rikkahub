@@ -164,6 +164,14 @@ class SubagentRunner(
 
     // ---- 内部实现 ----
 
+    /**
+     * 解析子代理配置的模型。
+     *
+     * `model` 字段支持两种格式：
+     * - `model: gpt-4o`              只按模型 ID/显示名匹配（同名时命中第一个配置的供应商）
+     * - `model: OpenAI/gpt-4o`       或 `openai:gpt-4o`，精确指定供应商
+     * - 留空则继承主 agent 模型
+     */
     private fun resolveModel(
         definition: SubagentMetadata,
         settings: Settings,
@@ -171,17 +179,29 @@ class SubagentRunner(
     ): Model {
         val modelName = definition.model?.trim().orEmpty()
         if (modelName.isEmpty()) return parentModel
+
+        // 拆分可选的 "供应商/" 或 "供应商:" 前缀
+        val slashIndex = modelName.indexOf('/')
+        val colonIndex = modelName.indexOf(':')
+        val sepIndex = listOf(slashIndex, colonIndex).filter { it >= 0 }.minOrNull()
+        val providerFilter = if (sepIndex != null) modelName.substring(0, sepIndex).trim() else null
+        val modelPart = if (sepIndex != null) modelName.substring(sepIndex + 1).trim() else modelName
+
         settings.providers.forEach { provider ->
+            if (providerFilter != null && !provider.name.equals(providerFilter, ignoreCase = true)) {
+                return@forEach
+            }
             provider.models.forEach { model ->
-                if (model.modelId == modelName || model.displayName == modelName) {
+                if (model.modelId == modelPart || model.displayName == modelPart) {
                     return model
                 }
             }
         }
         // 配置的模型不存在时明确报错，而不是静默回退到主模型，避免用户误以为配置已生效
         error(
-            "Subagent '${definition.name}' 指定的模型 '$modelName' 未配置。请检查 AGENT.md 的 model 字段，" +
-                "或在设置中添加该模型；清空 model 字段则继承主 agent 模型。"
+            "Subagent '${definition.name}' 指定的模型 '$modelName' 未配置。请检查 AGENT.md 的 model 字段" +
+                "（支持 '供应商/模型ID' 格式，如 OpenAI/gpt-4o），或在设置中添加该模型；" +
+                "清空 model 字段则继承主 agent 模型。"
         )
     }
 
