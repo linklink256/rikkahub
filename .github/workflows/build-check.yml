@@ -47,7 +47,7 @@ jobs:
 
       # 仓库不含 google-services.json（Firebase 配置在原作者 secrets 中），
       # 此处写入占位配置以满足 google-services 插件，仅用于编译验证。
-      # client 数组必须包含与 applicationId 匹配的条目，否则插件报 "No matching client found"。
+      # debug 变体 applicationId 带 .debug 后缀，因此 client 需同时覆盖两个包名。
       - name: Prepare placeholder google-services.json
         run: |
           cat > app/google-services.json << 'EOF'
@@ -63,6 +63,25 @@ jobs:
                   "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
                   "android_client_info": {
                     "package_name": "me.rerere.rikkahub"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": []
+                  }
+                }
+              },
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000001",
+                  "android_client_info": {
+                    "package_name": "me.rerere.rikkahub.debug"
                   }
                 },
                 "oauth_client": [],
