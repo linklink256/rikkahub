@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- 思考档位 MAX（与 ReasoningLevel.MAX 对应）。放在独立文件以便单独推送，避免覆盖大型 strings.xml -->
+  <string name="reasoning_max">Max</string>
+</resources>
