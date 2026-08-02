@@ -1,4 +1,4 @@
-name: Build Check (Debug)
+name: Build Release (Subagent)
 
 on:
   push:
@@ -48,25 +48,48 @@ jobs:
             ~/.gradle/wrapper
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
 
-      # 仓库不含 google-services.json（Firebase 配置在原作者 secrets 中），
-      # 此处写入占位配置以满足 google-services 插件（需匹配 debug 包名），仅用于编译验证。
-      - name: Prepare placeholder google-services.json
+      # 签名 + 配置准备：
+      # 1) 解码 base64 的 keystore（仓库里存的是文本 .b64，避免二进制传输）
+      # 2) 写入 google-services.json 占位（匹配 subagent 包名，仅用于编译）
+      # 3) 写入 local.properties 签名配置
+      - name: Prepare keystore & config
         run: |
+          base64 -d keystore/subagent-release.p12.b64 > keystore/subagent-release.p12
           cat > app/google-services.json << 'EOF'
           {
             "project_info": {
               "project_number": "000000000000",
-              "project_id": "rikkahub-build-check",
-              "storage_bucket": "rikkahub-build-check.appspot.com"
+              "project_id": "rikkahub-subagent-build-check",
+              "storage_bucket": "rikkahub-subagent-build-check.appspot.com"
             },
             "client": [
               {
                 "client_info": {
                   "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
                   "android_client_info": {
-                    "package_name": "me.rerere.rikkahub.debug"
+                    "package_name": "me.rerere.rikkahub.subagent"
                   },
-                  "client_id": "android:me.rerere.rikkahub.debug"
+                  "client_id": "android:me.rerere.rikkahub.subagent"
+                },
+                "oauth_client": [],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": []
+                  }
+                }
+              },
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000001",
+                  "android_client_info": {
+                    "package_name": "me.rerere.rikkahub.subagent.debug"
+                  },
+                  "client_id": "android:me.rerere.rikkahub.subagent.debug"
                 },
                 "oauth_client": [],
                 "api_key": [
@@ -83,17 +106,23 @@ jobs:
             ]
           }
           EOF
+          cat > local.properties << 'EOF'
+          storeFile=keystore/subagent-release.p12
+          storePassword=subagent123
+          keyAlias=subagent
+          keyPassword=subagent123
+          EOF
 
-      - name: Build Debug APK
+      - name: Build Release APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --stacktrace
+          ./gradlew :app:assembleRelease --stacktrace
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rikkahub-debug-apks
-          path: app/build/outputs/apk/debug/*.apk
+          name: rikkahub-subagent-release-apks
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
       # 发布为 Prerelease，提供公开直链下载（无需登录）
@@ -101,11 +130,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: subagent-build
-          name: RikkaHub Subagent Build
+          tag_name: subagent-release
+          name: RikkaHub Subagent Release
           prerelease: true
           body: |
-            RikkaHub + Subagent 扩展构建（commit `${{ github.sha }}`）
+            RikkaHub + Subagent 扩展（独立签名 / 独立包名 `me.rerere.rikkahub.subagent`，可与原版共存）
 
             > ⚠️ 开发版本，可能不稳定，仅供测试。子代理功能：扩展管理 → 子代理。
-          files: app/build/outputs/apk/debug/*.apk
+          files: app/build/outputs/apk/release/*.apk
