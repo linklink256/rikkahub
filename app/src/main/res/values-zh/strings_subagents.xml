@@ -28,4 +28,7 @@
   <string name="subagents_page_repo_url_hint">仓库根目录或子目录需包含 AGENT.md</string>
   <string name="subagents_page_downloading">下载中...</string>
   <string name="subagents_page_import_confirm">导入</string>
+  <string name="extension_selector_tab_subagents">子代理</string>
+  <string name="extension_selector_subagents_empty">暂无子代理</string>
+  <string name="extension_selector_go_to_subagents">前往子代理</string>
 </resources>

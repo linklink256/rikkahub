@@ -28,4 +28,7 @@
   <string name="subagents_page_repo_url_hint">The repository should contain an AGENT.md in root or a subdirectory</string>
   <string name="subagents_page_downloading">Downloading...</string>
   <string name="subagents_page_import_confirm">Import</string>
+  <string name="extension_selector_tab_subagents">Subagents</string>
+  <string name="extension_selector_subagents_empty">No subagents available</string>
+  <string name="extension_selector_go_to_subagents">Go to Subagents</string>
 </resources>
