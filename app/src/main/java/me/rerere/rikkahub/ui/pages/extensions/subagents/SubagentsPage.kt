@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,25 +14,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -56,7 +48,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
@@ -81,7 +72,6 @@ import org.koin.androidx.compose.koinViewModel
 fun SubagentsPage() {
     val vm = koinViewModel<SubagentsVM>()
     val subagents by vm.subagents.collectAsStateWithLifecycle()
-    val availableModels by vm.availableModels.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val toaster = LocalToaster.current
     val context = LocalContext.current
@@ -196,8 +186,6 @@ fun SubagentsPage() {
         EditSubagentDialog(
             title = stringResource(R.string.subagents_page_add_title),
             initialContent = "",
-            availableModels = availableModels,
-            availableTools = vm.availableTools,
             onDismiss = { showAddDialog = false },
             onConfirm = { name, content ->
                 vm.saveSubagent(name, content) { success ->
@@ -215,8 +203,6 @@ fun SubagentsPage() {
         EditSubagentDialog(
             title = stringResource(R.string.subagents_page_edit_title, subagent.name),
             initialContent = initialContent,
-            availableModels = availableModels,
-            availableTools = vm.availableTools,
             onDismiss = { editing = null },
             onConfirm = { name, content ->
                 vm.saveSubagent(name, content) { success ->
@@ -306,7 +292,7 @@ private fun SubagentCard(
                 ) {
                     if (!subagent.model.isNullOrBlank()) {
                         Text(
-                            text = stringResource(R.string.subagents_page_model, subagent.model),
+                            text = subagent.model,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.tertiary,
                         )
@@ -422,157 +408,49 @@ private fun SubagentImportSheetItem(
 private fun EditSubagentDialog(
     title: String,
     initialContent: String,
-    availableModels: List<ModelOption>,
-    availableTools: List<String>,
     onDismiss: () -> Unit,
     onConfirm: (name: String, content: String) -> Unit,
 ) {
-    val fm = remember(initialContent) { SkillFrontmatterParser.parse(initialContent) }
-    val body = remember(initialContent) { SkillFrontmatterParser.extractBody(initialContent) }
-    var name by rememberSaveable(initialContent) { mutableStateOf(fm["name"] ?: "") }
-    var description by rememberSaveable(initialContent) { mutableStateOf(fm["description"] ?: "") }
-    var model by rememberSaveable(initialContent) { mutableStateOf(fm["model"] ?: "") }
-    var tools by rememberSaveable(initialContent) {
-        mutableStateOf(
-            (fm["tools"]?.split(",", " ")?.map { it.trim() }?.filter { it.isNotBlank() }?.toMutableSet())
-                ?: mutableSetOf()
-        )
-    }
-    var maxIterations by rememberSaveable(initialContent) { mutableStateOf(fm["maxIterations"] ?: "") }
-    var temperature by rememberSaveable(initialContent) { mutableStateOf(fm["temperature"] ?: "") }
-    var prompt by rememberSaveable(initialContent) { mutableStateOf(body) }
+    var content by rememberSaveable { mutableStateOf(initialContent) }
 
-    val nameError = name.isBlank()
-    val allToolOptions = remember(availableTools, tools) {
-        (availableTools + tools.filter { it !in availableTools }).distinct()
+    val name = remember(content) {
+        SkillFrontmatterParser.parse(content)["name"]?.trim() ?: ""
     }
+    val nameError = content.isNotBlank() && name.isBlank()
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text(stringResource(R.string.subagents_page_name_label)) },
-                    singleLine = true,
-                    isError = nameError,
-                    supportingText = if (nameError) {
-                        {
-                            Text(
-                                stringResource(R.string.subagents_page_name_error),
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    } else null,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text(stringResource(R.string.subagents_page_description_label)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                // 模型选择（继承主模型 或 已配置模型）
-                ModelDropdown(
-                    selected = model,
-                    options = availableModels,
-                    onSelected = { model = it },
-                )
-
-                // 工具多选
-                Text(
-                    text = stringResource(R.string.subagents_page_tools_label),
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    allToolOptions.forEach { toolName ->
-                        FilterChip(
-                            selected = toolName in tools,
-                            onClick = {
-                                if (toolName in tools) tools.remove(toolName) else tools.add(toolName)
-                            },
-                            label = { Text(toolName) },
-                        )
-                    }
-                }
-                Text(
-                    text = stringResource(R.string.subagents_page_tools_hint),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    OutlinedTextField(
-                        value = maxIterations,
-                        onValueChange = { maxIterations = it },
-                        label = { Text(stringResource(R.string.subagents_page_max_iterations_label)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
+            OutlinedTextField(
+                value = content,
+                onValueChange = { content = it },
+                label = { Text(stringResource(R.string.subagents_page_content_label)) },
+                placeholder = {
+                    Text(
+                        "---\nname: scout\ndescription: \"...\"\ntools: workspace_read_file, workspace_shell\nmodel: \nmaxIterations: 10\n---\n\n角色指令...",
+                        fontFamily = FontFamily.Monospace,
                     )
-                    OutlinedTextField(
-                        value = temperature,
-                        onValueChange = { temperature = it },
-                        label = { Text(stringResource(R.string.subagents_page_temperature_label)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.weight(1f),
+                },
+                supportingText = {
+                    if (nameError) Text(
+                        stringResource(R.string.subagents_page_name_error),
+                        color = MaterialTheme.colorScheme.error
                     )
-                }
-
-                OutlinedTextField(
-                    value = prompt,
-                    onValueChange = { prompt = it },
-                    label = { Text(stringResource(R.string.subagents_page_prompt_label)) },
-                    placeholder = {
-                        Text(
-                            "你是一个……\n- 职责\n- 约束\n- 输出格式",
-                        )
-                    },
-                    minLines = 8,
-                    maxLines = 12,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+                    else if (name.isNotBlank()) Text(stringResource(R.string.subagents_page_name, name))
+                    else Text(stringResource(R.string.subagents_page_paste_hint))
+                },
+                isError = nameError,
+                minLines = 10,
+                maxLines = 16,
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                modifier = Modifier.fillMaxWidth(),
+            )
         },
         confirmButton = {
             TextButton(
-                onClick = {
-                    val content = buildString {
-                        appendLine("---")
-                        appendLine("name: $name")
-                        appendLine("description: \"${description.replace("\"", "\\\"")}\"")
-                        if (model.isNotBlank()) appendLine("model: $model")
-                        if (tools.isNotEmpty()) appendLine("tools: ${tools.joinToString(", ")}")
-                        if (maxIterations.isNotBlank()) {
-                            appendLine("maxIterations: ${maxIterations.toIntOrNull() ?: 10}")
-                        }
-                        if (temperature.isNotBlank()) {
-                            appendLine("temperature: ${temperature.toFloatOrNull() ?: 0.2f}")
-                        }
-                        appendLine("---")
-                        appendLine()
-                        append(prompt.trim())
-                    }
-                    onConfirm(name, content)
-                },
-                enabled = !nameError,
+                onClick = { onConfirm(name, content) },
+                enabled = name.isNotBlank() && !nameError,
             ) {
                 Text(stringResource(R.string.subagents_page_save))
             }
@@ -581,55 +459,6 @@ private fun EditSubagentDialog(
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         },
     )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ModelDropdown(
-    selected: String,
-    options: List<ModelOption>,
-    onSelected: (String) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val selectedLabel = options.find { it.value == selected }?.label
-        ?: if (selected.isBlank()) stringResource(R.string.subagents_page_model_inherit) else selected
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-    ) {
-        OutlinedTextField(
-            value = selectedLabel,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text(stringResource(R.string.subagents_page_model_label)) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.subagents_page_model_inherit)) },
-                onClick = {
-                    onSelected("")
-                    expanded = false
-                },
-            )
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option.label) },
-                    onClick = {
-                        onSelected(option.value)
-                        expanded = false
-                    },
-                )
-            }
-        }
-    }
 }
 
 @Composable
