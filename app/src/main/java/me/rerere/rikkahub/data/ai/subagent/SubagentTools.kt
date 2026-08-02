@@ -10,12 +10,65 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.files.SubagentManager
 
 /**
- * 子代理管理工具：让主 agent 可以自己创建 / 更新 / 删除子代理角色定义（AGENT.md），
+ * 子代理管理工具：让主 agent 可以自己列出 / 读取 / 创建 / 更新 / 删除子代理角色定义（AGENT.md），
  * 与 skills 类似——用户直接在对话里说"帮我创建一个 XX 子代理"即可。
  */
 fun createSubagentManagementTools(
     subagentManager: SubagentManager,
 ): List<Tool> = listOf(
+    Tool(
+        name = "list_subagents",
+        description = """
+            List all installed subagent roles (name, description, tools whitelist, model).
+            Use this when the user asks what subagents are available, or before delegating/editing.
+        """.trimIndent(),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {},
+            )
+        },
+        execute = {
+            val list = subagentManager.listSubagents()
+            val text = if (list.isEmpty()) {
+                "No subagents installed. Use `create_subagent` to create one."
+            } else {
+                buildString {
+                    appendLine("Installed subagents (${list.size}):")
+                    list.forEach { s ->
+                        appendLine("- ${s.name}: ${s.description}")
+                        appendLine("    tools: ${s.tools.joinToString(", ").ifEmpty { "(all)" }}")
+                        appendLine("    model: ${s.model ?: "(inherit main agent)"}")
+                    }
+                }
+            }
+            listOf(UIMessagePart.Text(text))
+        }
+    ),
+    Tool(
+        name = "read_subagent",
+        description = """
+            Read the full AGENT.md definition of an existing subagent role (frontmatter + body).
+            Use this when the user asks to view a subagent's current definition, or before updating one.
+        """.trimIndent(),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("name", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Name of the subagent role to read")
+                    })
+                },
+                required = listOf("name"),
+            )
+        },
+        execute = { input ->
+            val name = input.jsonObject["name"]?.jsonPrimitive?.content?.trim().orEmpty()
+            require(name.isNotBlank()) { "Missing required argument: name" }
+            val content = subagentManager.readSubagentContent(name)
+                ?: error("Subagent '$name' not found. Use `list_subagents` to see available roles.")
+            listOf(UIMessagePart.Text(content))
+        }
+    ),
     Tool(
         name = "create_subagent",
         description = """
@@ -24,6 +77,7 @@ fun createSubagentManagementTools(
             Use this when the user asks to create, define or modify a subagent role, e.g.
             "create a code reviewer subagent" or "add a research subagent".
             The role body becomes the subagent's system prompt; tools is a whitelist the subagent may use.
+            model supports 'provider/modelId' format, e.g. OpenAI/gpt-4o.
         """.trimIndent(),
         parameters = {
             InputSchema.Obj(
@@ -50,7 +104,10 @@ fun createSubagentManagementTools(
                     })
                     put("model", buildJsonObject {
                         put("type", "string")
-                        put("description", "Optional model id for this role; omit to inherit the main agent's model")
+                        put(
+                            "description",
+                            "Optional model for this role, e.g. 'gpt-4o' or 'OpenAI/gpt-4o'. Omit to inherit the main agent's model."
+                        )
                     })
                     put("maxIterations", buildJsonObject {
                         put("type", "integer")
