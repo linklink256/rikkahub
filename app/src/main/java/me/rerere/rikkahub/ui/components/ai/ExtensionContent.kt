@@ -28,6 +28,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Link01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.files.SkillMetadata
+import me.rerere.rikkahub.data.files.SubagentMetadata
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.QuickMessage
@@ -137,6 +138,47 @@ fun SkillsContent(
                     Switch(
                         checked = enabledSkills.contains(skill.name),
                         onCheckedChange = { checked -> onToggle(skill.name, checked) }
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
+        }
+        if (onManage != null) {
+            item {
+                ManageButton(onClick = onManage)
+            }
+        }
+    }
+}
+
+@Composable
+fun SubagentsContent(
+    subagents: List<SubagentMetadata>,
+    enabledSubagents: Set<String>,
+    onToggle: (String, Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    onManage: (() -> Unit)? = null,
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        items(subagents, key = { it.agentDir.absolutePath }) { subagent ->
+            ListItem(
+                headlineContent = { Text(subagent.name) },
+                supportingContent = if (subagent.description.isNotBlank()) {
+                    {
+                        Text(
+                            text = subagent.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                } else null,
+                trailingContent = {
+                    Switch(
+                        checked = enabledSubagents.contains(subagent.name),
+                        onCheckedChange = { checked -> onToggle(subagent.name, checked) }
                     )
                 },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
