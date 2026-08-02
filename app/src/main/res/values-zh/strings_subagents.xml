@@ -6,6 +6,7 @@
   <string name="subagents_page_empty_title">暂无子代理</string>
   <string name="subagents_page_empty_hint">创建子代理角色或从 GitHub 导入</string>
   <string name="subagents_page_tool_count">%1$d 个工具</string>
+  <string name="subagents_page_model">模型：%1$s</string>
   <string name="subagents_page_more_actions">更多操作</string>
   <string name="subagents_page_edit">编辑</string>
   <string name="subagents_page_add_title">添加子代理</string>
@@ -19,8 +20,17 @@
   <string name="subagents_page_delete_title">删除子代理</string>
   <string name="subagents_page_delete_message">删除子代理 "%1$s"？</string>
   <string name="subagents_page_content_label">AGENT.md 内容</string>
+  <string name="subagents_page_name_label">名称 *</string>
   <string name="subagents_page_name_error">必须填写 name 字段</string>
   <string name="subagents_page_name">名称：%1$s</string>
+  <string name="subagents_page_description_label">描述 *</string>
+  <string name="subagents_page_model_label">模型</string>
+  <string name="subagents_page_model_inherit">继承主 agent 模型</string>
+  <string name="subagents_page_tools_label">工具</string>
+  <string name="subagents_page_tools_hint">工具在会话中可用时才生效（如工作区工具需要绑定工作区）</string>
+  <string name="subagents_page_max_iterations_label">最大迭代</string>
+  <string name="subagents_page_temperature_label">温度</string>
+  <string name="subagents_page_prompt_label">角色指令（System Prompt）</string>
   <string name="subagents_page_paste_hint">粘贴或编写 AGENT.md 内容</string>
   <string name="subagents_page_save">保存</string>
   <string name="subagents_page_import_description">输入包含 AGENT.md 文件的 GitHub 仓库地址。示例：https://github.com/owner/repo</string>
