@@ -11,85 +11,24 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SubagentManager
 import me.rerere.rikkahub.data.files.SubagentMetadata
 import org.json.JSONArray
 
-/** 模型下拉选项：label 用于展示，value 写入 AGENT.md 的 model 字段 */
-data class ModelOption(
-    val label: String,
-    val value: String,
-)
-
-/**
- * 子代理可用的工具清单（会话中实际可用的工具取决于 assistant 配置，
- * 例如 workspace 工具需要绑定工作区；未列出的工具可在 AGENT.md 中手动补充）。
- */
-internal val KNOWN_SUBAGENT_TOOLS = listOf(
-    // 工作区
-    "workspace_read_file",
-    "workspace_write_file",
-    "workspace_edit_file",
-    "workspace_shell",
-    // 搜索
-    "search_web",
-    "scrape_web",
-    // 对话引用
-    "recent_chats",
-    "conversation_search",
-    // 技能
-    "use_skill",
-    // 本地工具
-    "eval_javascript",
-    "time_info",
-    "clipboard",
-    "tts",
-    "ask_user",
-    "screen_time",
-    "calendar_query",
-    "calendar_create",
-)
-
 class SubagentsVM(
     private val subagentManager: SubagentManager,
-    private val settingsStore: SettingsStore,
 ) : ViewModel() {
     private val _subagents = MutableStateFlow<List<SubagentMetadata>>(emptyList())
     val subagents = _subagents.asStateFlow()
 
-    private val _availableModels = MutableStateFlow<List<ModelOption>>(emptyList())
-    val availableModels = _availableModels.asStateFlow()
-
-    val availableTools: List<String> = KNOWN_SUBAGENT_TOOLS
-
     init {
         loadSubagents()
-        observeModels()
     }
 
     private fun loadSubagents() {
         viewModelScope.launch(Dispatchers.IO) {
             _subagents.value = subagentManager.listSubagents()
-        }
-    }
-
-    /** 从用户已配置的 provider/models 拉取可用模型 */
-    private fun observeModels() {
-        viewModelScope.launch {
-            settingsStore.settingsFlow.collect { settings ->
-                _availableModels.value = settings.providers
-                    .flatMap { provider ->
-                        provider.models.map { model ->
-                            ModelOption(
-                                label = "${provider.name} / ${model.displayName} (${model.modelId})",
-                                value = model.modelId,
-                            )
-                        }
-                    }
-                    .distinctBy { it.value }
-            }
         }
     }
 
