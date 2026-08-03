@@ -43,6 +43,7 @@ fun createSubagentTool(
     toolPoolProvider: () -> List<Tool>,
     model: Model,
 ): Tool {
+    // 仅用于工具描述中的提示信息；execute 内始终动态读取最新角色列表
     val availableRoles = runCatching { subagentManager.listSubagents() }.getOrDefault(emptyList())
 
     return Tool(
@@ -158,10 +159,14 @@ fun createSubagentTool(
                 .orEmpty()
                 .take(MAX_SUBTASKS)
 
-            val definition = availableRoles.find { it.name == role }
+            // 动态读取当前角色列表，避免工具构建时的快照过期：
+            // 主 agent 可能刚通过工作区工具新建/修改了角色（含 model 字段），
+            // 静态快照会导致 "Subagent role not found" 而调用失败。
+            val currentRoles = runCatching { subagentManager.listSubagents() }.getOrDefault(emptyList())
+            val definition = currentRoles.find { it.name == role }
                 ?: return@Tool errorText(
                     "Subagent role '$role' not found. Available: " +
-                        (availableRoles.joinToString { it.name }.ifEmpty { "(none installed)" })
+                        (currentRoles.joinToString { it.name }.ifEmpty { "(none installed)" })
                 )
 
             val mode = when (args["mode"]?.jsonPrimitive?.content) {
