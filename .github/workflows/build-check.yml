@@ -49,14 +49,18 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
 
       # 签名 + 配置准备（固定签名：使用 secrets 中的原始 keystore，保证每次构建签名一致、可覆盖安装升级）：
-      # 1) secrets.KEY_BASE64 解码为 app/app.key（对应 SIGNING_CONFIG 的 storeFile=app/app.key；
-      #    build.gradle.kts 中以 rootProject.file 解析该相对路径）
-      # 2) 写入 google-services.json 占位（匹配 subagent 包名，仅用于编译；不依赖 secrets，
+      # 1) secrets.SIGNING_CONFIG 写入 local.properties（storeFile/storePassword/keyAlias/keyPassword）
+      # 2) 从 local.properties 读取 storeFile 实际路径，secrets.KEY_BASE64 解码到该路径
+      #    （build.gradle.kts 以 rootProject.file 解析相对路径，工作目录即仓库根目录，二者一致）
+      # 3) 写入 google-services.json 占位（匹配 subagent 包名，仅用于编译；不依赖 secrets，
       #    避免包名不一致导致插件校验失败）
-      # 3) secrets.SIGNING_CONFIG 写入 local.properties（storePassword/keyAlias/keyPassword）
       - name: Prepare keystore & config
         run: |
-          echo "${{ secrets.KEY_BASE64 }}" | base64 -d > app/app.key
+          printf '%s' "${{ secrets.SIGNING_CONFIG }}" > local.properties
+          storePath=$(grep '^storeFile=' local.properties | cut -d= -f2-)
+          echo "storeFile resolved: $storePath"
+          mkdir -p "$(dirname "$storePath")"
+          echo "${{ secrets.KEY_BASE64 }}" | base64 -d > "$storePath"
           cat > app/google-services.json << 'EOF'
           {
             "project_info": {
@@ -108,7 +112,6 @@ jobs:
             ]
           }
           EOF
-          printf '%s' "${{ secrets.SIGNING_CONFIG }}" > local.properties
 
       - name: Build Release APK
         run: |
