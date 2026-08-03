@@ -44,7 +44,7 @@ class SubagentManager(
     }
 
     /**
-     * 读取 `_groups/*.md` 中的小组描述 → Map<组名, 描述>。
+     * 读取 `_groups/<group>.md` 中的小组描述 → Map<组名, 描述>。
      *
      * 小组描述文件为可选载体，frontmatter 仅需 `name` + `description`（复用 [SkillFrontmatterParser]）。
      * 无 `_groups` 目录、目录为空或解析失败时返回 emptyMap；单个坏文件跳过，不影响其余小组。
