@@ -45,9 +45,11 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.common.http.jsonArrayOrNull
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.highlight.CodeHighlightText
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.Clipboard
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Eraser
@@ -347,6 +349,47 @@ object UseSkillToolUI : ToolUIRenderer {
         val skillName = context.arguments.getStringContent("name") ?: ""
         val path = context.arguments.getStringContent("path")
         return if (path != null) "Skill: $skillName / $path" else "Skill: $skillName"
+    }
+}
+
+/**
+ * 子代理委派: 标题标明委派的角色名, 多任务时显示子任务数量, 摘要显示任务描述
+ */
+object SubagentToolUI : ToolUIRenderer {
+    override val toolName: String = "subagent"
+
+    override fun icon(context: ToolUIContext): ImageVector = HugeIcons.Bot
+
+    @Composable
+    override fun title(context: ToolUIContext): String {
+        val role = context.arguments.getStringContent("role")
+        if (role == null) {
+            return stringResource(R.string.chat_message_tool_call_generic, toolName)
+        }
+        val subtaskCount = context.arguments.jsonObjectOrNull
+            ?.get("subtasks")?.jsonArrayOrNull?.size ?: 0
+        return if (subtaskCount > 1) {
+            stringResource(R.string.chat_message_tool_subagent_multi, role, subtaskCount)
+        } else {
+            stringResource(R.string.chat_message_tool_subagent, role)
+        }
+    }
+
+    override fun hasSummary(context: ToolUIContext): Boolean =
+        context.arguments.getStringContent("task") != null
+
+    @Composable
+    override fun Summary(context: ToolUIContext) {
+        context.arguments.getStringContent("task")?.let { task ->
+            Text(
+                text = task,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.shimmer(isLoading = context.loading),
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
