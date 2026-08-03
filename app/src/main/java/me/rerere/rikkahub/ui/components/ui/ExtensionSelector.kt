@@ -25,6 +25,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.files.SkillMetadata
+import me.rerere.rikkahub.data.files.SubagentManager
+import me.rerere.rikkahub.data.files.SubagentMetadata
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.ui.components.ai.ExtensionEmptyState
@@ -32,6 +34,7 @@ import me.rerere.rikkahub.ui.components.ai.LorebooksContent
 import me.rerere.rikkahub.ui.components.ai.ModeInjectionsContent
 import me.rerere.rikkahub.ui.components.ai.QuickMessagesContent
 import me.rerere.rikkahub.ui.components.ai.SkillsContent
+import me.rerere.rikkahub.ui.components.ai.SubagentsContent
 import org.koin.compose.koinInject
 
 
@@ -46,14 +49,19 @@ fun ExtensionSelector(
     onNavigateToQuickMessages: () -> Unit = {},
     onNavigateToPrompts: () -> Unit = {},
     onNavigateToSkills: () -> Unit = {},
+    onNavigateToSubagents: () -> Unit = {},
 ) {
     val skillManager: SkillManager = koinInject()
+    val subagentManager: SubagentManager = koinInject()
     var skills by remember { mutableStateOf<List<SkillMetadata>>(emptyList()) }
+    var subagents by remember { mutableStateOf<List<SubagentMetadata>>(emptyList()) }
 
     LaunchedEffect(Unit) {
         // 打开扩展面板时清理运行时被删除的技能（残留的 enabledSkills 引用），
         // prune 顺带返回现存技能列表，避免重复读盘
         skills = skillManager.pruneOrphanedEnabledSkills()
+        // 同样清理被删除的子代理残留引用，并返回现存列表
+        subagents = subagentManager.pruneOrphanedEnabledSubagents()
     }
 
     val useConversationInjections =
@@ -69,7 +77,7 @@ fun ExtensionSelector(
         assistant.lorebookIds
     }
 
-    val pagerState = rememberPagerState { 4 }
+    val pagerState = rememberPagerState { 5 }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -108,6 +116,13 @@ fun ExtensionSelector(
                     scope.launch { pagerState.animateScrollToPage(3) }
                 },
                 text = { Text(stringResource(R.string.extension_selector_tab_skills)) }
+            )
+            Tab(
+                selected = pagerState.currentPage == 4,
+                onClick = {
+                    scope.launch { pagerState.animateScrollToPage(4) }
+                },
+                text = { Text(stringResource(R.string.extension_selector_tab_subagents)) }
             )
         }
 
@@ -218,6 +233,38 @@ fun ExtensionSelector(
                             message = stringResource(R.string.extension_selector_skills_empty),
                             buttonText = stringResource(R.string.extension_selector_go_to_skills),
                             onAction = onNavigateToSkills,
+                        )
+                    }
+                }
+
+                4 -> {
+                    if (subagents.isNotEmpty()) {
+                        SubagentsContent(
+                            subagents = subagents,
+                            enabledSubagents = assistant.enabledSubagents,
+                            onToggle = { name, checked ->
+                                val newSubagents = if (checked) {
+                                    assistant.enabledSubagents + name
+                                } else {
+                                    assistant.enabledSubagents - name
+                                }
+                                onUpdate(assistant.copy(enabledSubagents = newSubagents))
+                            },
+                            onToggleGroup = { _, names, checked ->
+                                val newSubagents = if (checked) {
+                                    assistant.enabledSubagents + names
+                                } else {
+                                    assistant.enabledSubagents - names
+                                }
+                                onUpdate(assistant.copy(enabledSubagents = newSubagents))
+                            },
+                            onManage = onNavigateToSubagents,
+                        )
+                    } else {
+                        ExtensionEmptyState(
+                            message = stringResource(R.string.extension_selector_subagents_empty),
+                            buttonText = stringResource(R.string.extension_selector_go_to_subagents),
+                            onAction = onNavigateToSubagents,
                         )
                     }
                 }

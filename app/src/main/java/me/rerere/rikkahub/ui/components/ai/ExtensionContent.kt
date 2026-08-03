@@ -16,11 +16,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.ExternalLink
 import com.composables.icons.lucide.Lucide
@@ -28,6 +31,8 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Link01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.files.SkillMetadata
+import me.rerere.rikkahub.data.files.SubagentManager
+import me.rerere.rikkahub.data.files.SubagentMetadata
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.QuickMessage
@@ -147,6 +152,115 @@ fun SkillsContent(
                 ManageButton(onClick = onManage)
             }
         }
+    }
+}
+
+@Composable
+fun SubagentsContent(
+    subagents: List<SubagentMetadata>,
+    enabledSubagents: Set<String>,
+    onToggle: (String, Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    onManage: (() -> Unit)? = null,
+    onToggleGroup: ((group: String, names: Set<String>, checked: Boolean) -> Unit)? = null,
+) {
+    // 按 group 分组；default 组始终排在最后；成员名集合在 LazyColumn 外预计算（LazyListScope 非 Composable 上下文）
+    val groups = remember(subagents) {
+        subagents
+            .groupBy { it.group }
+            .toList()
+            .sortedBy { (group, _) -> if (group == SubagentManager.DEFAULT_GROUP) 1 else 0 }
+            .map { (group, members) ->
+                Triple(group, members, members.mapTo(LinkedHashSet()) { it.name })
+            }
+    }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        groups.forEach { (group, members, memberNames) ->
+            val selectedCount = members.count { it.name in enabledSubagents }
+            item(key = "group-header-$group") {
+                SubagentGroupHeader(
+                    groupName = group,
+                    selectedCount = selectedCount,
+                    totalCount = members.size,
+                    onToggleAll = {
+                        onToggleGroup?.invoke(group, memberNames, selectedCount != members.size)
+                    },
+                )
+            }
+            items(members, key = { it.agentDir.absolutePath }) { subagent ->
+                ListItem(
+                    headlineContent = { Text(subagent.name) },
+                    supportingContent = if (subagent.description.isNotBlank()) {
+                        {
+                            Text(
+                                text = subagent.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                    } else null,
+                    trailingContent = {
+                        Switch(
+                            checked = enabledSubagents.contains(subagent.name),
+                            onCheckedChange = { checked -> onToggle(subagent.name, checked) }
+                        )
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+        }
+        if (onManage != null) {
+            item {
+                ManageButton(onClick = onManage)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubagentGroupHeader(
+    groupName: String,
+    selectedCount: Int,
+    totalCount: Int,
+    onToggleAll: (Boolean) -> Unit,
+) {
+    val state = when {
+        selectedCount == 0 -> ToggleableState.Off
+        selectedCount == totalCount -> ToggleableState.On
+        else -> ToggleableState.Indeterminate
+    }
+    val displayName = if (groupName == SubagentManager.DEFAULT_GROUP) {
+        stringResource(R.string.subagents_page_default_group)
+    } else {
+        groupName
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = displayName,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = stringResource(R.string.subagents_page_group_count, selectedCount, totalCount),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 8.dp),
+        )
+        TriStateCheckbox(
+            state = state,
+            onClick = { onToggleAll(selectedCount != totalCount) },
+        )
     }
 }
 

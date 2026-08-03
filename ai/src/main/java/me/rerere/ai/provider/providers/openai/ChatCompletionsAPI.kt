@@ -379,28 +379,14 @@ class ChatCompletionsAPI(
                     }
 
                     "api.moonshot.cn" -> {
-                        // K3：不使用 thinking 参数，改用顶层 reasoning_effort（仅接受 low/high/max，#1573）
-                        if (ModelRegistry.KIMI_K3.match(params.model.modelId) ||
-                            ModelRegistry.KIMI_K3_ALIAS.match(params.model.modelId)
-                        ) {
-                            if (level != ReasoningLevel.AUTO) {
-                                put("reasoning_effort", when (level) {
-                                    ReasoningLevel.OFF, ReasoningLevel.LOW -> "low"
-                                    ReasoningLevel.MEDIUM, ReasoningLevel.HIGH -> "high"
-                                    ReasoningLevel.XHIGH, ReasoningLevel.MAX -> "max"
-                                    else -> "high" // 与 Kimi Code 官方默认一致
-                                })
+                        put("thinking", buildJsonObject {
+                            put("type", if (!level.isEnabled) "disabled" else "enabled")
+                            // K2.6 的 thinking.keep 默认为 null（忽略历史思考），思考开启时
+                            // 需显式传 "all" 才是保留式思考；文档推荐与 enabled 搭配（#1586）
+                            if (level.isEnabled && ModelRegistry.KIMI_K2_6.match(params.model.modelId)) {
+                                put("keep", "all")
                             }
-                        } else {
-                            put("thinking", buildJsonObject {
-                                put("type", if (!level.isEnabled) "disabled" else "enabled")
-                                // K2.6 的 thinking.keep 默认为 null（忽略历史思考），思考开启时
-                                // 需显式传 "all" 才是保留式思考；文档推荐与 enabled 搭配（#1586）
-                                if (level.isEnabled && ModelRegistry.KIMI_K2_6.match(params.model.modelId)) {
-                                    put("keep", "all")
-                                }
-                            })
-                        }
+                        })
                     }
 
                     "api.deepseek.com" -> {
@@ -408,7 +394,6 @@ class ChatCompletionsAPI(
                             put("type", if (!level.isEnabled) "disabled" else "enabled")
                         })
                         if (level.isEnabled && level != ReasoningLevel.AUTO) {
-                            // 服务端自行映射 effort（含 max），客户端直接透传档位值
                             put("reasoning_effort", level.effort)
                         }
                     }
@@ -416,12 +401,8 @@ class ChatCompletionsAPI(
                     "integrate.api.nvidia.com" -> {
                         if ("deepseek-v4" in params.model.modelId.lowercase()) {
                             if (level != ReasoningLevel.AUTO) {
-                                val effort = when (level) {
-                                    ReasoningLevel.XHIGH, ReasoningLevel.MAX -> "max"
-                                    ReasoningLevel.OFF -> "none"
-                                    else -> "high"
-                                }
-                                put("reasoning_effort", effort)
+                                // 不做档位映射，直接透传 effort（如 "max"），模型会自动映射
+                                put("reasoning_effort", level.effort)
                             }
                         } else {
                             if (level != ReasoningLevel.AUTO) {

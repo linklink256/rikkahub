@@ -4,6 +4,7 @@ import android.content.Context
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
+import me.rerere.rikkahub.data.files.SubagentManager
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
@@ -57,6 +58,10 @@ val repositoryModule = module {
                     target = "/skills",
                 ),
                 WorkspaceBindMount(
+                    source = File(context.filesDir, FileFolders.AGENTS).apply { mkdirs() },
+                    target = "/agents",
+                ),
+                WorkspaceBindMount(
                     source = File(context.filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() },
                     target = "/tool_outputs",
                 ),
@@ -82,5 +87,9 @@ val repositoryModule = module {
 
     single {
         SkillManager(get(), get())
+    }
+
+    single {
+        SubagentManager(get(), get())
     }
 }

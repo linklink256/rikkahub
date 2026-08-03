@@ -489,6 +489,7 @@ data class SyncResult(
 object FileFolders {
     const val UPLOAD = "upload"
     const val SKILLS = "skills"
+    const val AGENTS = "agents"
     const val FONTS = "fonts"
     const val TOOL_OUTPUTS = "tool_outputs"
 }
