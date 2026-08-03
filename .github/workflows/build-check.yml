@@ -48,15 +48,15 @@ jobs:
             ~/.gradle/wrapper
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
 
-      # 签名 + 配置准备：
-      # 1) 解码 base64 的 keystore（仓库里存的是文本 .b64，避免二进制传输）。
-      #    注意：signingConfig 的 storeFile 相对路径基于 app/ 模块目录解析，故放到 app/keystore/。
-      # 2) 写入 google-services.json 占位（匹配 subagent 包名，仅用于编译）
-      # 3) 写入 local.properties 签名配置
+      # 签名 + 配置准备（固定签名：使用 secrets 中的原始 keystore，保证每次构建签名一致、可覆盖安装升级）：
+      # 1) secrets.KEY_BASE64 解码为 app/app.key（对应 SIGNING_CONFIG 的 storeFile=app/app.key；
+      #    build.gradle.kts 中以 rootProject.file 解析该相对路径）
+      # 2) 写入 google-services.json 占位（匹配 subagent 包名，仅用于编译；不依赖 secrets，
+      #    避免包名不一致导致插件校验失败）
+      # 3) secrets.SIGNING_CONFIG 写入 local.properties（storePassword/keyAlias/keyPassword）
       - name: Prepare keystore & config
         run: |
-          mkdir -p app/keystore
-          base64 -d keystore/subagent-release.p12.b64 > app/keystore/subagent-release.p12
+          echo "${{ secrets.KEY_BASE64 }}" | base64 -d > app/app.key
           cat > app/google-services.json << 'EOF'
           {
             "project_info": {
@@ -108,12 +108,7 @@ jobs:
             ]
           }
           EOF
-          cat > local.properties << 'EOF'
-          storeFile=keystore/subagent-release.p12
-          storePassword=subagent123
-          keyAlias=subagent
-          keyPassword=subagent123
-          EOF
+          printf '%s' "${{ secrets.SIGNING_CONFIG }}" > local.properties
 
       - name: Build Release APK
         run: |
@@ -136,7 +131,7 @@ jobs:
           name: RikkaHub Subagent Release
           prerelease: true
           body: |
-            RikkaHub + Subagent 扩展（独立签名 / 独立包名 `me.linklink256.rikkahub`，可与原版共存）
+            RikkaHub + Subagent 扩展（固定签名 app.key / 独立包名 `me.linklink256.rikkahub`，可与官方版共存）
 
             > ⚠️ 开发版本，可能不稳定，仅供测试。子代理功能：扩展管理 → 子代理。
           files: app/build/outputs/apk/release/*.apk
