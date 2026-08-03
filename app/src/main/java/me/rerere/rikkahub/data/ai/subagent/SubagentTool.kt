@@ -73,30 +73,33 @@ fun createSubagentTool(
             // 动态读取当前角色列表注入系统提示（与 skills 的 <available_skills> 注入模式一致），
             // 让主 agent 在每轮对话都能看到可用角色及其用途，从而积极委派。
             val roles = runCatching { subagentManager.listSubagents() }.getOrDefault(emptyList())
-            if (roles.isEmpty()) return@systemPrompt ""
-            buildString {
-                appendLine("**Subagents**")
-                appendLine(
-                    "You can delegate focused tasks to subagents via the `subagent` tool. " +
-                        "Be proactive: when the user's request matches one of the roles below, or the task is " +
-                        "large/independent/parallelizable, delegate it instead of doing everything yourself."
-                )
-                appendLine("<available_subagents>")
-                roles.groupBy { it.group }.forEach { (group, members) ->
-                    appendLine("  <group name=\"$group\">")
-                    members.forEach { s ->
-                        appendLine("    <subagent>")
-                        appendLine("      <name>${s.name}</name>")
-                        appendLine("      <description>${s.description}</description>")
-                        if (s.tools.isNotEmpty()) {
-                            appendLine("      <tools>${s.tools.joinToString(", ")}</tools>")
+            if (roles.isEmpty()) {
+                ""
+            } else {
+                buildString {
+                    appendLine("**Subagents**")
+                    appendLine(
+                        "You can delegate focused tasks to subagents via the `subagent` tool. " +
+                            "Be proactive: when the user's request matches one of the roles below, or the task is " +
+                            "large/independent/parallelizable, delegate it instead of doing everything yourself."
+                    )
+                    appendLine("<available_subagents>")
+                    roles.groupBy { it.group }.forEach { (group, members) ->
+                        appendLine("  <group name=\"$group\">")
+                        members.forEach { s ->
+                            appendLine("    <subagent>")
+                            appendLine("      <name>${s.name}</name>")
+                            appendLine("      <description>${s.description}</description>")
+                            if (s.tools.isNotEmpty()) {
+                                appendLine("      <tools>${s.tools.joinToString(", ")}</tools>")
+                            }
+                            s.model?.let { appendLine("      <model>$it</model>") }
+                            appendLine("    </subagent>")
                         }
-                        s.model?.let { appendLine("      <model>$it</model>") }
-                        appendLine("    </subagent>")
+                        appendLine("  </group>")
                     }
-                    appendLine("  </group>")
+                    append("</available_subagents>")
                 }
-                append("</available_subagents>")
             }
         },
         parameters = {

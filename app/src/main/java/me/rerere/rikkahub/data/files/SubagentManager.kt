@@ -195,7 +195,7 @@ class SubagentManager(
 data class SubagentMetadata(
     val name: String,
     val description: String,
-    val group: String = DEFAULT_GROUP,
+    val group: String = SubagentManager.DEFAULT_GROUP,
     val tools: List<String> = emptyList(),
     val model: String? = null,
     val maxIterations: Int = 10,

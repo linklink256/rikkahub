@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.ToggleableState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -16,7 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ToggleableState
 import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -164,20 +164,22 @@ fun SubagentsContent(
     onManage: (() -> Unit)? = null,
     onToggleGroup: ((group: String, names: Set<String>, checked: Boolean) -> Unit)? = null,
 ) {
-    // 按 group 分组；default 组始终排在最后
+    // 按 group 分组；default 组始终排在最后；成员名集合在 LazyColumn 外预计算（LazyListScope 非 Composable 上下文）
     val groups = remember(subagents) {
         subagents
             .groupBy { it.group }
             .toList()
             .sortedBy { (group, _) -> if (group == SubagentManager.DEFAULT_GROUP) 1 else 0 }
+            .map { (group, members) ->
+                Triple(group, members, members.mapTo(LinkedHashSet()) { it.name })
+            }
     }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        groups.forEach { (group, members) ->
-            val memberNames = remember(members) { members.mapTo(LinkedHashSet()) { it.name } }
+        groups.forEach { (group, members, memberNames) ->
             val selectedCount = members.count { it.name in enabledSubagents }
             item(key = "group-header-$group") {
                 SubagentGroupHeader(
