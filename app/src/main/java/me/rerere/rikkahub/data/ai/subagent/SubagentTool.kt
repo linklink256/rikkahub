@@ -21,6 +21,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.SubagentManager
 import me.rerere.rikkahub.data.files.SubagentMetadata
+import me.rerere.rikkahub.data.files.applyEnabledSubagents
 import me.rerere.rikkahub.utils.JsonInstant
 
 private const val PARALLEL_CONCURRENCY = 4
@@ -42,9 +43,14 @@ fun createSubagentTool(
     settingsStore: SettingsStore,
     toolPoolProvider: () -> List<Tool>,
     model: Model,
+    enabledSubagents: Set<String>,
 ): Tool {
     // 仅用于工具描述中的提示信息；execute 内始终动态读取最新角色列表
-    val availableRoles = runCatching { subagentManager.listSubagents() }.getOrDefault(emptyList())
+    // 快照同样按 enabledSubagents 过滤，保证描述与 systemPrompt 口径一致
+    val availableRoles = runCatching { subagentManager.listSubagents() }
+        .getOrDefault(emptyList())
+        .applyEnabledSubagents(enabledSubagents)
+    val groupDescriptions = runCatching { subagentManager.listGroupDescriptions() }.getOrDefault(emptyMap())
 
     return Tool(
         name = "subagent",
@@ -67,26 +73,43 @@ fun createSubagentTool(
             - For independent subtasks use mode=parallel (max 8 subtasks); for sequential handoffs use mode=chain.
             - Set `boundary` and `acceptance` to constrain the subagent and verify its result.
 
-            Available subagents: ${availableRoles.joinToString { "${it.name}(${it.description})" }}
+            Available subagent groups and their enabled members:
+            ${buildString {
+                availableRoles.groupBy { it.group }.forEach { (group, members) ->
+                    appendLine("- $group${groupDescriptions[group]?.let { ": $it" } ?: ""}")
+                    members.forEach { s ->
+                        appendLine("  - ${s.name}: ${s.description}")
+                    }
+                }
+            }.trimEnd()}
             Install more roles in Extensions > Subagents.
         """.trimIndent(),
         systemPrompt = { _, _ ->
             // 动态读取当前角色列表注入系统提示（与 skills 的 <available_skills> 注入模式一致），
             // 让主 agent 在每轮对话都能看到可用角色及其用途，从而积极委派。
-            val roles = runCatching { subagentManager.listSubagents() }.getOrDefault(emptyList())
+            // 只列该助手已启用（applyEnabledSubagents 过滤后）的角色；过滤后为空的小组整组省略。
+            val roles = runCatching { subagentManager.listSubagents() }
+                .getOrDefault(emptyList())
+                .applyEnabledSubagents(enabledSubagents)
             if (roles.isEmpty()) {
                 ""
             } else {
+                val groupDescriptions = runCatching { subagentManager.listGroupDescriptions() }.getOrDefault(emptyMap())
                 buildString {
                     appendLine("**Subagents**")
                     appendLine(
-                        "You can delegate focused tasks to subagents via the `subagent` tool. " +
-                            "Be proactive: when the user's request matches one of the roles below, or the task is " +
-                            "large/independent/parallelizable, delegate it instead of doing everything yourself."
+                        "You can delegate focused tasks to subagents via the `subagent` tool. Be proactive: " +
+                            "when the user's request matches a role below, or the task is large/independent/" +
+                            "parallelizable, delegate it instead of doing everything yourself."
+                    )
+                    appendLine(
+                        "你可以通过 `subagent` 工具把聚焦的任务委派给子代理。请积极主动：" +
+                            "当用户请求与下列某组中的角色匹配，或任务较大/可独立/可并行时，优先委派，而不是全部自己做。"
                     )
                     appendLine("<available_subagents>")
                     roles.groupBy { it.group }.forEach { (group, members) ->
                         appendLine("  <group name=\"$group\">")
+                        groupDescriptions[group]?.let { appendLine("    <description>$it</description>") }
                         members.forEach { s ->
                             appendLine("    <subagent>")
                             appendLine("      <name>${s.name}</name>")
@@ -162,10 +185,13 @@ fun createSubagentTool(
             // 动态读取当前角色列表，避免工具构建时的快照过期：
             // 主 agent 可能刚通过工作区工具新建/修改了角色（含 model 字段），
             // 静态快照会导致 "Subagent role not found" 而调用失败。
-            val currentRoles = runCatching { subagentManager.listSubagents() }.getOrDefault(emptyList())
+            // 同样按 enabledSubagents 过滤，只允许委派给该助手已启用的角色。
+            val currentRoles = runCatching { subagentManager.listSubagents() }
+                .getOrDefault(emptyList())
+                .applyEnabledSubagents(enabledSubagents)
             val definition = currentRoles.find { it.name == role }
                 ?: return@Tool errorText(
-                    "Subagent role '$role' not found. Available: " +
+                    "Subagent role '$role' not found or not enabled for this assistant. Available: " +
                         (currentRoles.joinToString { it.name }.ifEmpty { "(none installed)" })
                 )
 

@@ -163,6 +163,7 @@ fun SubagentsContent(
     modifier: Modifier = Modifier,
     onManage: (() -> Unit)? = null,
     onToggleGroup: ((group: String, names: Set<String>, checked: Boolean) -> Unit)? = null,
+    groupDescriptions: Map<String, String> = emptyMap(),
 ) {
     // 按 group 分组；default 组始终排在最后；成员名集合在 LazyColumn 外预计算（LazyListScope 非 Composable 上下文）
     val groups = remember(subagents) {
@@ -180,10 +181,16 @@ fun SubagentsContent(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         groups.forEach { (group, members, memberNames) ->
-            val selectedCount = members.count { it.name in enabledSubagents }
+            // "有效启用"口径：空集 = 全部启用，故空集时视为全组已启用
+            val selectedCount = if (enabledSubagents.isEmpty()) {
+                members.size
+            } else {
+                members.count { it.name in enabledSubagents }
+            }
             item(key = "group-header-$group") {
                 SubagentGroupHeader(
                     groupName = group,
+                    groupDescription = groupDescriptions[group],
                     selectedCount = selectedCount,
                     totalCount = members.size,
                     onToggleAll = {
@@ -205,7 +212,7 @@ fun SubagentsContent(
                     } else null,
                     trailingContent = {
                         Switch(
-                            checked = enabledSubagents.contains(subagent.name),
+                            checked = enabledSubagents.isEmpty() || enabledSubagents.contains(subagent.name),
                             onCheckedChange = { checked -> onToggle(subagent.name, checked) }
                         )
                     },
@@ -227,6 +234,7 @@ private fun SubagentGroupHeader(
     selectedCount: Int,
     totalCount: Int,
     onToggleAll: (Boolean) -> Unit,
+    groupDescription: String? = null,
 ) {
     val state = when {
         selectedCount == 0 -> ToggleableState.Off
@@ -245,12 +253,20 @@ private fun SubagentGroupHeader(
             .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = displayName,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.weight(1f),
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = displayName,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            if (!groupDescription.isNullOrBlank()) {
+                Text(
+                    text = groupDescription,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+        }
         Text(
             text = stringResource(R.string.subagents_page_group_count, selectedCount, totalCount),
             style = MaterialTheme.typography.labelMedium,
