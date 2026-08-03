@@ -250,6 +250,14 @@ fun ExtensionSelector(
                                 }
                                 onUpdate(assistant.copy(enabledSubagents = newSubagents))
                             },
+                            onToggleGroup = { _, names, checked ->
+                                val newSubagents = if (checked) {
+                                    assistant.enabledSubagents + names
+                                } else {
+                                    assistant.enabledSubagents - names
+                                }
+                                onUpdate(assistant.copy(enabledSubagents = newSubagents))
+                            },
                             onManage = onNavigateToSubagents,
                         )
                     } else {

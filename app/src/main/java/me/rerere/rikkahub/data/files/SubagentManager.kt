@@ -16,6 +16,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
  * ---
  * name: scout
  * description: 只读调研，压缩调查结果
+ * group: research            # 可选，分组名，用于选择界面按组全选/部分选择；不填归入默认组
  * tools: workspace_read_file, workspace_shell, search
  * model: gemini-flash        # 可选，不填则继承主 agent 模型
  * maxIterations: 8           # 可选，默认 10
@@ -33,6 +34,7 @@ class SubagentManager(
     companion object {
         private const val TAG = "SubagentManager"
         private const val DEFAULT_MAX_ITERATIONS = 10
+        const val DEFAULT_GROUP = "default"
     }
 
     fun getAgentsDir(): File {
@@ -172,6 +174,7 @@ class SubagentManager(
             SubagentMetadata(
                 name = name,
                 description = description,
+                group = frontmatter["group"]?.takeIf { it.isNotBlank() } ?: DEFAULT_GROUP,
                 tools = frontmatter["tools"]
                     ?.split(",", " ")
                     ?.map { it.trim() }
@@ -192,6 +195,7 @@ class SubagentManager(
 data class SubagentMetadata(
     val name: String,
     val description: String,
+    val group: String = DEFAULT_GROUP,
     val tools: List<String> = emptyList(),
     val model: String? = null,
     val maxIterations: Int = 10,

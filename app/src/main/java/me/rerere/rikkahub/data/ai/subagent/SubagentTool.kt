@@ -52,15 +52,63 @@ fun createSubagentTool(
             system prompt, tool whitelist and optional model; they do NOT inherit the conversation history.
             Use for large, focused or parallelizable work (research, planning, review, refactoring) to keep
             the main context clean. Returns a structured result.
-            Available subagents: ${availableRoles.joinToString { it.name }}
+
+            WHEN TO USE (be proactive):
+            - The user's request matches a role listed in the system prompt (see <available_subagents>).
+            - The task is large, independent or parallelizable (research, planning, code review, refactoring,
+              multi-file analysis, batch operations). Delegate instead of doing it all in the main context.
+            - You need a different model or a focused tool whitelist for a subtask.
+            - The task would bloat the conversation history with long file dumps or repetitive steps.
+
+            HOW TO DELEGATE:
+            - Pick the best matching role; if unsure, pick the closest one and describe the task precisely.
+            - Provide a self-contained `task`; include only a minimal `context` summary, never the full history.
+            - For independent subtasks use mode=parallel (max 8 subtasks); for sequential handoffs use mode=chain.
+            - Set `boundary` and `acceptance` to constrain the subagent and verify its result.
+
+            Available subagents: ${availableRoles.joinToString { "${it.name}(${it.description})" }}
             Install more roles in Extensions > Subagents.
         """.trimIndent(),
+        systemPrompt = { _, _ ->
+            // 动态读取当前角色列表注入系统提示（与 skills 的 <available_skills> 注入模式一致），
+            // 让主 agent 在每轮对话都能看到可用角色及其用途，从而积极委派。
+            val roles = runCatching { subagentManager.listSubagents() }.getOrDefault(emptyList())
+            if (roles.isEmpty()) return@systemPrompt ""
+            buildString {
+                appendLine("**Subagents**")
+                appendLine(
+                    "You can delegate focused tasks to subagents via the `subagent` tool. " +
+                        "Be proactive: when the user's request matches one of the roles below, or the task is " +
+                        "large/independent/parallelizable, delegate it instead of doing everything yourself."
+                )
+                appendLine("<available_subagents>")
+                roles.groupBy { it.group }.forEach { (group, members) ->
+                    appendLine("  <group name=\"$group\">")
+                    members.forEach { s ->
+                        appendLine("    <subagent>")
+                        appendLine("      <name>${s.name}</name>")
+                        appendLine("      <description>${s.description}</description>")
+                        if (s.tools.isNotEmpty()) {
+                            appendLine("      <tools>${s.tools.joinToString(", ")}</tools>")
+                        }
+                        s.model?.let { appendLine("      <model>$it</model>") }
+                        appendLine("    </subagent>")
+                    }
+                    appendLine("  </group>")
+                }
+                append("</available_subagents>")
+            }
+        },
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("role", buildJsonObject {
                         put("type", "string")
-                        put("description", "Subagent role. Available: ${availableRoles.joinToString { it.name }}")
+                        put(
+                            "description",
+                            "Subagent role to delegate to. Choose the role whose description best matches the task. " +
+                                "Available: ${availableRoles.joinToString { "${it.name} - ${it.description}" }}"
+                        )
                     })
                     put("task", buildJsonObject {
                         put("type", "string")

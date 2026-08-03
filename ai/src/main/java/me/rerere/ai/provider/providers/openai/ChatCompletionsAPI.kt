@@ -401,12 +401,8 @@ class ChatCompletionsAPI(
                     "integrate.api.nvidia.com" -> {
                         if ("deepseek-v4" in params.model.modelId.lowercase()) {
                             if (level != ReasoningLevel.AUTO) {
-                                val effort = when (level) {
-                                    ReasoningLevel.XHIGH -> "max"
-                                    ReasoningLevel.OFF -> "none"
-                                    else -> "high"
-                                }
-                                put("reasoning_effort", effort)
+                                // 不做档位映射，直接透传 effort（如 "max"），模型会自动映射
+                                put("reasoning_effort", level.effort)
                             }
                         } else {
                             if (level != ReasoningLevel.AUTO) {

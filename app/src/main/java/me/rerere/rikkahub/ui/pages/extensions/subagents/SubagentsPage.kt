@@ -60,6 +60,7 @@ import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
+import me.rerere.rikkahub.data.files.SubagentManager
 import me.rerere.rikkahub.data.files.SubagentMetadata
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
@@ -290,6 +291,15 @@ private fun SubagentCard(
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    Text(
+                        text = if (subagent.group == SubagentManager.DEFAULT_GROUP) {
+                            stringResource(R.string.subagents_page_default_group)
+                        } else {
+                            subagent.group
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
                     if (!subagent.model.isNullOrBlank()) {
                         Text(
                             text = subagent.model,
@@ -428,7 +438,7 @@ private fun EditSubagentDialog(
                 label = { Text(stringResource(R.string.subagents_page_content_label)) },
                 placeholder = {
                     Text(
-                        "---\nname: scout\ndescription: \"...\"\ntools: workspace_read_file, workspace_shell\nmodel: \nmaxIterations: 10\n---\n\n角色指令...",
+                        "---\nname: scout\ndescription: \"...\"\ngroup: research\nmodel: \nmaxIterations: 10\n---\n\n角色指令...",
                         fontFamily = FontFamily.Monospace,
                     )
                 },
