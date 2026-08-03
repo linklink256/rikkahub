@@ -57,6 +57,7 @@ import me.rerere.rikkahub.data.ai.tools.createSkillTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.files.SubagentManager
+import me.rerere.rikkahub.data.files.applyEnabledSubagents
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
@@ -595,8 +596,11 @@ class ChatService(
                     // 系统设置查询工具：主 agent 可查看供应商/模型，为子代理指定 model
                     addAll(createProviderSettingsTools(settingsStore))
 
-                    // 委派工具：安装子代理角色后可用
-                    if (runCatching { subagentManager.listSubagents().isNotEmpty() }.getOrDefault(false)) {
+                    // 委派工具：安装子代理角色后可用；只暴露该助手已启用的角色（空集=全部启用）
+                    val enabledSubagents = runCatching {
+                        subagentManager.listSubagents().applyEnabledSubagents(assistant.enabledSubagents)
+                    }.getOrDefault(emptyList())
+                    if (enabledSubagents.isNotEmpty()) {
                         add(
                             createSubagentTool(
                                 subagentManager = subagentManager,
@@ -604,6 +608,7 @@ class ChatService(
                                 settingsStore = settingsStore,
                                 toolPoolProvider = { toolPoolRef.get() },
                                 model = model,
+                                enabledSubagents = assistant.enabledSubagents,
                             )
                         )
                     }

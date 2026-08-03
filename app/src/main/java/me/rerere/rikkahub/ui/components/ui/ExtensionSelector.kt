@@ -55,6 +55,7 @@ fun ExtensionSelector(
     val subagentManager: SubagentManager = koinInject()
     var skills by remember { mutableStateOf<List<SkillMetadata>>(emptyList()) }
     var subagents by remember { mutableStateOf<List<SubagentMetadata>>(emptyList()) }
+    var groupDescriptions by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     LaunchedEffect(Unit) {
         // 打开扩展面板时清理运行时被删除的技能（残留的 enabledSkills 引用），
@@ -62,6 +63,8 @@ fun ExtensionSelector(
         skills = skillManager.pruneOrphanedEnabledSkills()
         // 同样清理被删除的子代理残留引用，并返回现存列表
         subagents = subagentManager.pruneOrphanedEnabledSubagents()
+        // 读取一次小组描述（_groups/*.md），供组头副标题展示
+        groupDescriptions = subagentManager.listGroupDescriptions()
     }
 
     val useConversationInjections =
@@ -242,19 +245,32 @@ fun ExtensionSelector(
                         SubagentsContent(
                             subagents = subagents,
                             enabledSubagents = assistant.enabledSubagents,
+                            groupDescriptions = groupDescriptions,
                             onToggle = { name, checked ->
-                                val newSubagents = if (checked) {
-                                    assistant.enabledSubagents + name
+                                // 空集语义 = 全部启用：首次取消勾选前先物化为全部已装角色名，再执行加减
+                                val base = if (assistant.enabledSubagents.isEmpty()) {
+                                    subagents.mapTo(LinkedHashSet()) { it.name }
                                 } else {
-                                    assistant.enabledSubagents - name
+                                    assistant.enabledSubagents
+                                }
+                                val newSubagents = if (checked) {
+                                    base + name
+                                } else {
+                                    base - name
                                 }
                                 onUpdate(assistant.copy(enabledSubagents = newSubagents))
                             },
                             onToggleGroup = { _, names, checked ->
-                                val newSubagents = if (checked) {
-                                    assistant.enabledSubagents + names
+                                // 组全选同样先物化空集为全部角色名，再执行加减
+                                val base = if (assistant.enabledSubagents.isEmpty()) {
+                                    subagents.mapTo(LinkedHashSet()) { it.name }
                                 } else {
-                                    assistant.enabledSubagents - names
+                                    assistant.enabledSubagents
+                                }
+                                val newSubagents = if (checked) {
+                                    base + names
+                                } else {
+                                    base - names
                                 }
                                 onUpdate(assistant.copy(enabledSubagents = newSubagents))
                             },

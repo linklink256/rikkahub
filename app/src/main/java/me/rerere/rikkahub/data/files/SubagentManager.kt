@@ -43,6 +43,32 @@ class SubagentManager(
         return dir
     }
 
+    /**
+     * 读取 `_groups/*.md` 中的小组描述 → Map<组名, 描述>。
+     *
+     * 小组描述文件为可选载体，frontmatter 仅需 `name` + `description`（复用 [SkillFrontmatterParser]）。
+     * 无 `_groups` 目录、目录为空或解析失败时返回 emptyMap；单个坏文件跳过，不影响其余小组。
+     */
+    fun listGroupDescriptions(): Map<String, String> {
+        val groupsDir = getAgentsDir().resolve("_groups")
+        if (!groupsDir.isDirectory) return emptyMap()
+        return groupsDir.listFiles()
+            ?.filter { it.isFile && it.extension == "md" }
+            ?.mapNotNull { file ->
+                runCatching {
+                    val frontmatter = SkillFrontmatterParser.parse(file.readText())
+                    val name = frontmatter["name"]?.takeIf { it.isNotBlank() } ?: return@runCatching null
+                    val description = frontmatter["description"]?.takeIf { it.isNotBlank() } ?: return@runCatching null
+                    name to description
+                }.getOrElse {
+                    Log.w(TAG, "listGroupDescriptions: Failed to parse ${file.absolutePath}", it)
+                    null
+                }
+            }
+            ?.toMap()
+            ?: emptyMap()
+    }
+
     fun listSubagents(): List<SubagentMetadata> {
         val agentsDir = getAgentsDir()
         return agentsDir.listFiles()
@@ -204,3 +230,17 @@ data class SubagentMetadata(
 ) {
     val agentFile: File get() = agentDir.resolve("AGENT.md")
 }
+
+/** 子代理小组描述（来源 `_groups/<group>.md` 的 frontmatter）。 */
+data class SubagentGroup(
+    val name: String,
+    val description: String,
+)
+
+/**
+ * 按 `enabled` 白名单过滤子代理角色。
+ *
+ * 空集语义 = 全部启用（不限制），向后兼容现状（全部可用）并符合积极性目标。
+ */
+fun List<SubagentMetadata>.applyEnabledSubagents(enabled: Set<String>): List<SubagentMetadata> =
+    if (enabled.isEmpty()) this else filter { it.name in enabled }
