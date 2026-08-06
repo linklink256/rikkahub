@@ -32,8 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.unit.dpimport androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowTurnBackward
@@ -43,6 +42,7 @@ import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.tools.local.resolveRemoteDeviceToolApproval
 import me.rerere.rikkahub.data.device.ShellDeviceConfig
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -114,7 +114,9 @@ fun RemoteDeviceDetailPage(
                     device = device,
                     testing = state.testing,
                     connectionTest = state.connectionTest,
+                    toolApprovals = state.toolApprovals,
                     onTest = { vm.testConnection() },
+                    onToolApprovalChange = { name, v -> vm.setToolApproval(name, v) },
                 )
 
                 1 -> RemoteDeviceFilesPage(
@@ -133,7 +135,9 @@ private fun RemoteDeviceBasicPage(
     device: ShellDeviceConfig?,
     testing: Boolean,
     connectionTest: String?,
+    toolApprovals: Map<String, Boolean>,
     onTest: () -> Unit,
+    onToolApprovalChange: (String, Boolean) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -206,6 +210,78 @@ private fun RemoteDeviceBasicPage(
                             },
                         )
                     }
+                }
+            }
+        }
+        item {
+            RemoteDeviceToolApprovalCard(
+                overrides = toolApprovals,
+                onToolApprovalChange = onToolApprovalChange,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RemoteDeviceToolApprovalCard(
+    overrides: Map<String, Boolean>,
+    onToolApprovalChange: (String, Boolean) -> Unit,
+) {
+    val items = listOf(
+        "list_shells" to stringResource(R.string.remote_device_tool_list_shells),
+        "execute_shell_command" to stringResource(R.string.remote_device_tool_execute_command),
+        "file_read" to stringResource(R.string.remote_device_tool_file_read),
+        "file_write" to stringResource(R.string.remote_device_tool_file_write),
+        "file_glob" to stringResource(R.string.remote_device_tool_file_glob),
+        "file_grep" to stringResource(R.string.remote_device_tool_file_grep),
+    )
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = stringResource(R.string.remote_device_tool_approval_title),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = stringResource(R.string.remote_device_tool_approval_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            items.forEach { (toolName, label) ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = toolName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = resolveRemoteDeviceToolApproval(toolName, overrides),
+                        onCheckedChange = { onToolApprovalChange(toolName, it) },
+                    )
                 }
             }
         }
