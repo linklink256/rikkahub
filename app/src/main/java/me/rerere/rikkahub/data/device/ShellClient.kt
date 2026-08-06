@@ -371,7 +371,7 @@ class ShellClient(
 
     /**
      * 远程目录条目（Conch 版）。Conch 的 glob 不区分文件/目录，
-     * 用两个 glob 探测：`path/*`（直接子项）+ `path/*/`（子目录）。
+     * 用两个 glob 探测：直接子项（glob 星号）+ 子目录（glob 星号加斜杠）。
      */
     @kotlinx.serialization.Serializable
     data class RemoteFileEntry(
