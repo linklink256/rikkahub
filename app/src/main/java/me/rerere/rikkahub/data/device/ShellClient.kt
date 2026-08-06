@@ -403,7 +403,8 @@ class ShellClient(
             .sortedWith(compareByDescending<RemoteFileEntry> { it.isDirectory }.thenBy { it.name.lowercase() })
     }
 
-    suspend fun fileGrep(pattern: String, basePath: String = "", fileGlob: String = ""): Result<List<GrepMatch>> {        val params = mutableMapOf("pattern" to pattern)
+    suspend fun fileGrep(pattern: String, basePath: String = "", fileGlob: String = ""): Result<List<GrepMatch>> {
+        val params = mutableMapOf("pattern" to pattern)
         if (basePath.isNotBlank()) params["path"] = basePath
         if (fileGlob.isNotBlank()) params["glob"] = fileGlob
         val payload = buildJsonBodyFile(params)
