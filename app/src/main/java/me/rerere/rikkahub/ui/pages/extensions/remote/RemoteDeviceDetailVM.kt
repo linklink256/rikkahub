@@ -31,6 +31,7 @@ data class RemoteDeviceDetailState(
     val error: String? = null,
     val connectionTest: String? = null,
     val testing: Boolean = false,
+    val toolApprovals: Map<String, Boolean> = emptyMap(),
 )
 
 class RemoteDeviceDetailVM(
@@ -48,10 +49,19 @@ class RemoteDeviceDetailVM(
         viewModelScope.launch {
             settingsStore.settingsFlow.collect { settings ->
                 val dev = settings.devices.firstOrNull { it.id == deviceId }
-                _state.value = _state.value.copy(device = dev)
+                _state.value = _state.value.copy(
+                    device = dev,
+                    toolApprovals = settings.deviceToolApprovals,
+                )
             }
         }
         refresh()
+    }
+
+    fun setToolApproval(toolName: String, needsApproval: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setDeviceToolApproval(toolName, needsApproval)
+        }
     }
 
     fun refresh() {
@@ -89,8 +99,7 @@ class RemoteDeviceDetailVM(
         refresh()
     }
 
-    fun testConnection() {
-        val dev = _state.value.device ?: return
+    fun testConnection() {        val dev = _state.value.device ?: return
         viewModelScope.launch {
             _state.value = _state.value.copy(testing = true, connectionTest = null)
             val result = withContext(Dispatchers.IO) {
