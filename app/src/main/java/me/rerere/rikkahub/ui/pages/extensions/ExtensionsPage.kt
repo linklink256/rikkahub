@@ -19,6 +19,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.rikkahub.R
 import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Bot
+import me.rerere.hugeicons.stroke.ComputerTerminal01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Puzzle
@@ -86,6 +87,12 @@ fun ExtensionsPage() {
                         leadingContent = { Icon(HugeIcons.Folder01, null) },
                         headlineContent = { Text(stringResource(R.string.extensions_page_workspace)) },
                         supportingContent = { Text(stringResource(R.string.extensions_page_workspace_desc)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.RemoteDevices) },
+                        leadingContent = { Icon(HugeIcons.ComputerTerminal01, null) },
+                        headlineContent = { Text(stringResource(R.string.extensions_page_remote_devices)) },
+                        supportingContent = { Text(stringResource(R.string.extensions_page_remote_devices_desc)) },
                     )
                 }
             }
