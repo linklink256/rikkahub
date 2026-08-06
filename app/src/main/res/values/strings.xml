@@ -1335,4 +1335,13 @@
   <string name="remote_device_detail_test_connection">Test Connection</string>
   <string name="remote_device_detail_testing">Testing…</string>
   <string name="remote_device_detail_empty_dir">Empty directory</string>
+  <!-- Remote device tool approvals -->
+  <string name="remote_device_tool_approval_title">Tool Approval</string>
+  <string name="remote_device_tool_approval_desc">Require user confirmation before the AI runs these tools. Disable to let the AI use them without asking.</string>
+  <string name="remote_device_tool_list_shells">List devices</string>
+  <string name="remote_device_tool_execute_command">Execute shell command</string>
+  <string name="remote_device_tool_file_read">Read file</string>
+  <string name="remote_device_tool_file_write">Write file</string>
+  <string name="remote_device_tool_file_glob">List files (glob)</string>
+  <string name="remote_device_tool_file_grep">Search files (grep)</string>
 </resources>
