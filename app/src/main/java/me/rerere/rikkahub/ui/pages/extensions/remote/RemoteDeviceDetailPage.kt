@@ -46,6 +46,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.device.ShellDeviceConfig
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
