@@ -369,8 +369,41 @@ class ShellClient(
         return Result.success(files)
     }
 
-    suspend fun fileGrep(pattern: String, basePath: String = "", fileGlob: String = ""): Result<List<GrepMatch>> {
-        val params = mutableMapOf("pattern" to pattern)
+    /**
+     * 远程目录条目（Conch 版）。Conch 的 glob 不区分文件/目录，
+     * 用两个 glob 探测：`path/*`（直接子项）+ `path/*/`（子目录）。
+     */
+    @kotlinx.serialization.Serializable
+    data class RemoteFileEntry(
+        val name: String,
+        val path: String,
+        val isDirectory: Boolean,
+        val sizeBytes: Long = 0L,
+        val updatedAt: Long = 0L,
+    )
+
+    /** 列出远程目录内容（Conch fileGlob 探测）。失败时抛 IllegalStateException。 */
+    suspend fun listDirectory(path: String): List<RemoteFileEntry> {
+        val base = path.trimEnd('/')
+        // 直接子文件/目录：glob "*" 匹配当前层
+        val direct = fileGlob("*", base, depth = 1).getOrElse { throw IllegalStateException(it.message ?: "glob failed") }
+        // 子目录探测：glob "*/" 匹配目录（若服务器实现支持）
+        val dirs = fileGlob("*/", base, depth = 1).getOrDefault(emptyList())
+        val dirSet = dirs.map { it.trimEnd('/') }.toSet()
+        return direct
+            .filter { it != base }
+            .map { pathStr ->
+                val name = pathStr.substringAfterLast('/')
+                RemoteFileEntry(
+                    name = name,
+                    path = pathStr,
+                    isDirectory = pathStr in dirSet,
+                )
+            }
+            .sortedWith(compareByDescending<RemoteFileEntry> { it.isDirectory }.thenBy { it.name.lowercase() })
+    }
+
+    suspend fun fileGrep(pattern: String, basePath: String = "", fileGlob: String = ""): Result<List<GrepMatch>> {        val params = mutableMapOf("pattern" to pattern)
         if (basePath.isNotBlank()) params["path"] = basePath
         if (fileGlob.isNotBlank()) params["glob"] = fileGlob
         val payload = buildJsonBodyFile(params)
