@@ -25,9 +25,31 @@ import kotlinx.coroutines.withContext
  * 提供：list_shells / execute_shell_command / file_read / file_write / file_glob / file_grep
  * 支持 Conch 协议设备（加密远程 Shell）与 SSH 设备。
  */
+
+/** 远程设备工具审批默认值：命令执行/写文件默认需审批，读取类工具默认免审批 */
+val RemoteDeviceToolDefaultApprovals: Map<String, Boolean> = mapOf(
+    "list_shells" to false,
+    "execute_shell_command" to true,
+    "file_read" to false,
+    "file_write" to true,
+    "file_glob" to false,
+    "file_grep" to false,
+)
+
+/** 解析远程设备工具审批：用户覆盖 > 默认值 */
+fun resolveRemoteDeviceToolApproval(name: String, overrides: Map<String, Boolean>): Boolean =
+    overrides[name] ?: RemoteDeviceToolDefaultApprovals[name] ?: false
+
 class ShellToolProvider(
     private val settingsStore: SettingsStore,
 ) {
+    /** 当前生效的审批覆盖（来自 Settings.deviceToolApprovals），组装工具时快照 */
+    private fun approvalOverrides(): Map<String, Boolean> =
+        settingsStore.settingsFlow.value.deviceToolApprovals
+
+    private fun needsApproval(name: String, overrides: Map<String, Boolean>): Boolean =
+        resolveRemoteDeviceToolApproval(name, overrides)
+
     private suspend fun currentDevices(): List<ShellDeviceConfig> =
         settingsStore.settingsFlow.first().devices
 
@@ -41,18 +63,22 @@ class ShellToolProvider(
     private fun deviceNamesDesc(devices: List<ShellDeviceConfig>): String =
         devices.joinToString(", ") { "\"${it.name}\"" }
 
-    fun getTools(): List<Tool> = listOf(
-        listShellsTool(),
-        executeShellCommandTool(),
-        fileReadTool(),
-        fileWriteTool(),
-        fileGlobTool(),
-        fileGrepTool(),
-    )
+    fun getTools(): List<Tool> {
+        val overrides = approvalOverrides()
+        fun need(name: String) = needsApproval(name, overrides)
+        return listOf(
+            listShellsTool(need),
+            executeShellCommandTool(need),
+            fileReadTool(need),
+            fileWriteTool(need),
+            fileGlobTool(need),
+            fileGrepTool(need),
+        )
+    }
 
     // ── list_shells ─────────────────────────────────────────
 
-    private fun listShellsTool() = Tool(
+    private fun listShellsTool(need: (String) -> Boolean) = Tool(
         name = "list_shells",
         description = "List configured terminal devices (Conch servers and SSH hosts) that the assistant can use for shell commands and file operations.",
         parameters = {
@@ -61,7 +87,7 @@ class ShellToolProvider(
                 required = emptyList(),
             )
         },
-        needsApproval = { false },
+        needsApproval = { need("list_shells") },
         execute = {
             val devices = currentDevices()
             // 只暴露非敏感元信息，避免把加密密钥序列化进模型上下文
@@ -84,7 +110,7 @@ class ShellToolProvider(
 
     // ── execute_shell_command ───────────────────────────────
 
-    private fun executeShellCommandTool() = Tool(
+    private fun executeShellCommandTool(need: (String) -> Boolean) = Tool(
         name = "execute_shell_command",
         description = "Execute a shell command on a configured terminal device (Conch server or SSH host). " +
             "Use list_shells to see available devices.",
@@ -111,7 +137,7 @@ class ShellToolProvider(
                 required = listOf("command"),
             )
         },
-        needsApproval = { true },
+        needsApproval = { need("execute_shell_command") },
         execute = { args ->
             val obj = args.jsonObject
             val command = obj["command"]?.jsonPrimitive?.contentOrNull ?: return@Tool listOf(
@@ -198,7 +224,7 @@ class ShellToolProvider(
 
     // ── file_read ───────────────────────────────────────────
 
-    private fun fileReadTool() = Tool(
+    private fun fileReadTool(need: (String) -> Boolean) = Tool(
         name = "file_read",
         description = "Read a file from a configured terminal device (Conch server or SSH host).",
         parameters = {
@@ -224,7 +250,7 @@ class ShellToolProvider(
                 required = listOf("path"),
             )
         },
-        needsApproval = { false },
+        needsApproval = { need("file_read") },
         execute = { args ->
             val obj = args.jsonObject
             val path = obj["path"]?.jsonPrimitive?.contentOrNull ?: return@Tool listOf(
@@ -296,7 +322,7 @@ class ShellToolProvider(
 
     // ── file_write ──────────────────────────────────────────
 
-    private fun fileWriteTool() = Tool(
+    private fun fileWriteTool(need: (String) -> Boolean) = Tool(
         name = "file_write",
         description = "Write content to a file on a configured terminal device (Conch server or SSH host).",
         parameters = {
@@ -318,7 +344,7 @@ class ShellToolProvider(
                 required = listOf("path", "content"),
             )
         },
-        needsApproval = { true },
+        needsApproval = { need("file_write") },
         execute = { args ->
             val obj = args.jsonObject
             val path = obj["path"]?.jsonPrimitive?.contentOrNull ?: return@Tool listOf(
@@ -385,7 +411,7 @@ class ShellToolProvider(
 
     // ── file_glob ───────────────────────────────────────────
 
-    private fun fileGlobTool() = Tool(
+    private fun fileGlobTool(need: (String) -> Boolean) = Tool(
         name = "file_glob",
         description = "List files on a configured terminal device matching a glob pattern.",
         parameters = {
@@ -411,7 +437,7 @@ class ShellToolProvider(
                 required = listOf("pattern"),
             )
         },
-        needsApproval = { false },
+        needsApproval = { need("file_glob") },
         execute = { args ->
             val obj = args.jsonObject
             val pattern = obj["pattern"]?.jsonPrimitive?.contentOrNull ?: return@Tool listOf(
@@ -484,7 +510,7 @@ class ShellToolProvider(
 
     // ── file_grep ───────────────────────────────────────────
 
-    private fun fileGrepTool() = Tool(
+    private fun fileGrepTool(need: (String) -> Boolean) = Tool(
         name = "file_grep",
         description = "Search for a regex pattern in files on a configured terminal device.",
         parameters = {
@@ -510,7 +536,7 @@ class ShellToolProvider(
                 required = listOf("pattern"),
             )
         },
-        needsApproval = { false },
+        needsApproval = { need("file_grep") },
         execute = { args ->
             val obj = args.jsonObject
             val pattern = obj["pattern"]?.jsonPrimitive?.contentOrNull ?: return@Tool listOf(
