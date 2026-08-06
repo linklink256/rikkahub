@@ -1334,5 +1334,14 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="remote_device_detail_test_connection">测试连接</string>
   <string name="remote_device_detail_testing">正在测试…</string>
   <string name="remote_device_detail_empty_dir">空目录</string>
+  <!-- 远程设备工具审批 -->
+  <string name="remote_device_tool_approval_title">工具审批</string>
+  <string name="remote_device_tool_approval_desc">AI 调用以下工具前是否需要用户确认。关闭后 AI 可直接使用，无需询问。</string>
+  <string name="remote_device_tool_list_shells">列出设备</string>
+  <string name="remote_device_tool_execute_command">执行 Shell 命令</string>
+  <string name="remote_device_tool_file_read">读取文件</string>
+  <string name="remote_device_tool_file_write">写入文件</string>
+  <string name="remote_device_tool_file_glob">列出文件（glob）</string>
+  <string name="remote_device_tool_file_grep">搜索文件（grep）</string>
 </resources>
 
