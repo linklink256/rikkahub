@@ -13,6 +13,8 @@ import me.rerere.rikkahub.ui.pages.stats.StatsVM
 import me.rerere.rikkahub.ui.pages.imggen.ImgGenVM
 import me.rerere.rikkahub.ui.pages.extensions.PromptVM
 import me.rerere.rikkahub.ui.pages.extensions.QuickMessagesVM
+import me.rerere.rikkahub.ui.pages.extensions.remote.RemoteDeviceDetailVM
+import me.rerere.rikkahub.ui.pages.extensions.remote.RemoteDeviceVM
 import me.rerere.rikkahub.ui.pages.extensions.skills.SkillDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.skills.SkillsVM
 import me.rerere.rikkahub.ui.pages.extensions.subagents.SubagentsVM
@@ -73,6 +75,13 @@ val viewModelModule = module {
         WorkspaceDetailVM(
             id = it.get(),
             repository = get(),
+        )
+    }
+    viewModelOf(::RemoteDeviceVM)
+    viewModel<RemoteDeviceDetailVM> {
+        RemoteDeviceDetailVM(
+            deviceId = it.get(),
+            settingsStore = get(),
         )
     }
     viewModelOf(::FavoriteVM)
