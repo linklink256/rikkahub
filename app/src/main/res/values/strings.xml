@@ -1309,4 +1309,30 @@
   <string name="setting_page_devices_desc">Manage Conch and SSH terminal devices for the AI assistant</string>
   <string name="assistant_page_local_tools_shell_title">Terminal Devices (Shell)</string>
   <string name="assistant_page_local_tools_shell_desc">Let the AI execute shell commands and read/write files on your configured Conch or SSH devices</string>
+  <!-- Remote Devices (extensions) -->
+  <string name="extensions_page_remote_devices">Remote Devices</string>
+  <string name="extensions_page_remote_devices_desc">Manage SSH and Conch terminal devices accessible by Agent</string>
+  <string name="remote_device_page_title">Remote Devices</string>
+  <string name="remote_device_page_empty">No remote devices configured</string>
+  <string name="remote_device_page_empty_desc">Tap + to add an SSH or Conch device</string>
+  <string name="remote_device_page_add">Add Device</string>
+  <string name="remote_device_page_edit">Edit Device</string>
+  <string name="remote_device_page_delete">Delete Device</string>
+  <string name="remote_device_page_delete_confirm">This device will be removed from the list.</string>
+  <string name="remote_device_page_name">Name</string>
+  <string name="remote_device_page_server_url">Server URL</string>
+  <string name="remote_device_page_api_key">API Key</string>
+  <string name="remote_device_page_conch_public_key">Conch Public Key (optional)</string>
+  <string name="remote_device_page_ssh_host">SSH Host</string>
+  <string name="remote_device_page_ssh_port">SSH Port</string>
+  <string name="remote_device_page_ssh_user">SSH User</string>
+  <string name="remote_device_page_ssh_password">SSH Password</string>
+  <string name="remote_device_detail_title">Remote Device</string>
+  <string name="remote_device_detail_tab_basic">Basic</string>
+  <string name="remote_device_detail_tab_files">Files</string>
+  <string name="remote_device_detail_type">Type</string>
+  <string name="remote_device_detail_not_found">Device not found.</string>
+  <string name="remote_device_detail_test_connection">Test Connection</string>
+  <string name="remote_device_detail_testing">Testing…</string>
+  <string name="remote_device_detail_empty_dir">Empty directory</string>
 </resources>
