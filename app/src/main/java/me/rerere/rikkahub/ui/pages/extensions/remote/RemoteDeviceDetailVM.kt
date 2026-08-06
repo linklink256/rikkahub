@@ -106,7 +106,7 @@ class RemoteDeviceDetailVM(
                                 allowUnknownHostKey = true,
                             )
                             try {
-                                val r = client.executeCommand("echo ok", timeoutMs = 15_000)
+                                val r = client.executeCommand("echo ok", execTimeoutMs = 15_000)
                                 if (r.exitCode == 0) "Connected: ${r.stdout.trim()}" else "SSH failed: ${r.stderr.trim()}"
                             } finally {
                                 client.close()
