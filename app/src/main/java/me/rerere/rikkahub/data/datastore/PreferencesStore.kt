@@ -25,6 +25,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
+import me.rerere.rikkahub.data.device.ShellDeviceConfig
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
@@ -115,6 +116,9 @@ class SettingsStore(
 
         // MCP
         val MCP_SERVERS = stringPreferencesKey("mcp_servers")
+
+        // 终端设备管理
+        val DEVICES = stringPreferencesKey("devices")
 
         // WebDAV
         val WEBDAV_CONFIG = stringPreferencesKey("webdav_config")
@@ -239,6 +243,9 @@ class SettingsStore(
                 webServerJwtEnabled = preferences[WEB_SERVER_JWT_ENABLED] == true,
                 webServerAccessPassword = preferences[WEB_SERVER_ACCESS_PASSWORD] ?: "",
                 webServerLocalhostOnly = preferences[WEB_SERVER_LOCALHOST_ONLY] == true,
+                devices = preferences[DEVICES]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: emptyList(),
                 backupReminderConfig = preferences[BACKUP_REMINDER_CONFIG]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: BackupReminderConfig(),
@@ -409,6 +416,7 @@ class SettingsStore(
             preferences[WEB_SERVER_JWT_ENABLED] = settings.webServerJwtEnabled
             preferences[WEB_SERVER_ACCESS_PASSWORD] = settings.webServerAccessPassword
             preferences[WEB_SERVER_LOCALHOST_ONLY] = settings.webServerLocalhostOnly
+            preferences[DEVICES] = JsonInstant.encodeToString(settings.devices)
             preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
             preferences[LAUNCH_COUNT] = settings.launchCount
             preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
@@ -503,6 +511,27 @@ class SettingsStore(
             )
         }
     }
+
+    // ── 终端设备管理 ──
+
+    suspend fun saveDevice(device: ShellDeviceConfig) {
+        update { settings ->
+            val devices = settings.devices.toMutableList()
+            val index = devices.indexOfFirst { it.id == device.id }
+            if (index >= 0) {
+                devices[index] = device
+            } else {
+                devices.add(device)
+            }
+            settings.copy(devices = devices)
+        }
+    }
+
+    suspend fun deleteDevice(deviceId: String) {
+        update { settings ->
+            settings.copy(devices = settings.devices.filterNot { it.id == deviceId })
+        }
+    }
 }
 
 @Serializable
@@ -553,6 +582,7 @@ data class Settings(
     val webServerJwtEnabled: Boolean = false,
     val webServerAccessPassword: String = "",
     val webServerLocalhostOnly: Boolean = false,
+    val devices: List<ShellDeviceConfig> = emptyList(),
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
     val launchCount: Int = 0,
     val sponsorAlertDismissedAt: Int = 0,
