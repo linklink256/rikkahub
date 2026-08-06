@@ -119,7 +119,6 @@ class SettingsStore(
 
         // 终端设备管理
         val DEVICES = stringPreferencesKey("devices")
-        val DEVICE_TOOL_APPROVALS = stringPreferencesKey("device_tool_approvals")
 
         // WebDAV
         val WEBDAV_CONFIG = stringPreferencesKey("webdav_config")
@@ -247,9 +246,6 @@ class SettingsStore(
                 devices = preferences[DEVICES]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
-                deviceToolApprovals = preferences[DEVICE_TOOL_APPROVALS]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyMap(),
                 backupReminderConfig = preferences[BACKUP_REMINDER_CONFIG]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: BackupReminderConfig(),
@@ -421,7 +417,6 @@ class SettingsStore(
             preferences[WEB_SERVER_ACCESS_PASSWORD] = settings.webServerAccessPassword
             preferences[WEB_SERVER_LOCALHOST_ONLY] = settings.webServerLocalhostOnly
             preferences[DEVICES] = JsonInstant.encodeToString(settings.devices)
-            preferences[DEVICE_TOOL_APPROVALS] = JsonInstant.encodeToString(settings.deviceToolApprovals)
             preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
             preferences[LAUNCH_COUNT] = settings.launchCount
             preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
@@ -537,13 +532,6 @@ class SettingsStore(
             settings.copy(devices = settings.devices.filterNot { it.id == deviceId })
         }
     }
-
-    /** 设置远程设备工具审批覆盖（toolName -> needsApproval） */
-    suspend fun setDeviceToolApproval(toolName: String, needsApproval: Boolean) {
-        update { settings ->
-            settings.copy(deviceToolApprovals = settings.deviceToolApprovals + (toolName to needsApproval))
-        }
-    }
 }
 
 @Serializable
@@ -595,7 +583,6 @@ data class Settings(
     val webServerAccessPassword: String = "",
     val webServerLocalhostOnly: Boolean = false,
     val devices: List<ShellDeviceConfig> = emptyList(),
-    val deviceToolApprovals: Map<String, Boolean> = emptyMap(),
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
     val launchCount: Int = 0,
     val sponsorAlertDismissedAt: Int = 0,
