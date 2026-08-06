@@ -11,6 +11,7 @@ class LocalTools(
     private val eventBus: AppEventBus,
     private val ttsManager: TTSManager,
     private val settingsStore: SettingsStore,
+    private val shellToolProvider: ShellToolProvider,
 ) {
     val javascriptTool by lazy { buildJavascriptTool() }
 
@@ -51,6 +52,9 @@ class LocalTools(
         if (options.contains(LocalToolOption.Calendar)) {
             tools.add(calendarQueryTool)
             tools.add(calendarCreateTool)
+        }
+        if (options.contains(LocalToolOption.Shell)) {
+            tools.addAll(shellToolProvider.getTools())
         }
         return tools
     }
