@@ -347,9 +347,9 @@ private fun TypeChip(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    androidx.compose.material3.SuggestionChip(
+    androidx.compose.material3.FilterChip(
+        selected = selected,
         onClick = onClick,
         label = { Text(label) },
-        selected = selected,
     )
 }
