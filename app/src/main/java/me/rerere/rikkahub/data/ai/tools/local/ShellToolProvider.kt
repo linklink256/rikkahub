@@ -179,7 +179,7 @@ class ShellToolProvider(
                                 }.getOrElse { e ->
                                     return@getOrElse jsonError(
                                         "execute_shell_command",
-                                        describeConchRequestFailure(prepared.serverUrl, "/execute request", e),
+                                        describeConchRequestFailure(prepared.serverUrl, "/execute request", e as? Exception ?: Exception(e)),
                                         server = device.name,
                                         command = command,
                                     )
