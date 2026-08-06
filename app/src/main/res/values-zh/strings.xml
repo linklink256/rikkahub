@@ -1286,5 +1286,53 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="assistant_page_context_message_limit_count">上下文消息限制: %d</string>
   <string name="assistant_page_context_message_limit_unlimited">无限上下文消息</string>
   <string name="assistant_page_context_message_limit_warning">限制上下文会在每次上下文被修剪时使提示词缓存失效。更大的限制修剪频率更低；无限制则从不修剪，并保持缓存完全完好。</string>
+  <!-- 终端设备管理（设置页入口） -->
+  <string name="setting_devices_page_title">设备管理</string>
+  <string name="setting_devices_page_empty">尚未配置终端设备。点击 + 添加 Conch 或 SSH 设备。</string>
+  <string name="setting_devices_page_add">添加设备</string>
+  <string name="setting_devices_page_edit">编辑设备</string>
+  <string name="setting_devices_page_name">名称</string>
+  <string name="setting_devices_page_server_url">服务器地址</string>
+  <string name="setting_devices_page_api_key">API 密钥</string>
+  <string name="setting_devices_page_conch_public_key">Conch 公钥（可选）</string>
+  <string name="setting_devices_page_ssh_host">SSH 主机</string>
+  <string name="setting_devices_page_ssh_port">SSH 端口</string>
+  <string name="setting_devices_page_ssh_user">SSH 用户名</string>
+  <string name="setting_devices_page_ssh_password">SSH 密码</string>
+  <string name="setting_devices_page_save">保存</string>
+  <string name="setting_devices_page_cancel">取消</string>
+  <string name="setting_devices_page_delete_title">删除设备</string>
+  <string name="setting_devices_page_delete_message">删除设备 "%1$s"？</string>
+  <string name="setting_devices_page_delete_confirm">删除</string>
+  <string name="setting_page_devices">设备管理</string>
+  <string name="setting_page_devices_desc">管理可供 AI 助手使用的 Conch 和 SSH 终端设备</string>
+  <string name="assistant_page_local_tools_shell_title">终端设备（Shell）</string>
+  <string name="assistant_page_local_tools_shell_desc">允许 AI 在已配置的 Conch 或 SSH 设备上执行 Shell 命令及读写文件</string>
+  <!-- 远程设备（扩展页，工作区风格） -->
+  <string name="extensions_page_remote_devices">远程设备</string>
+  <string name="extensions_page_remote_devices_desc">管理可供 AI 助手访问的 SSH 和 Conch 终端设备</string>
+  <string name="remote_device_page_title">远程设备</string>
+  <string name="remote_device_page_empty">尚未配置远程设备</string>
+  <string name="remote_device_page_empty_desc">点击 + 添加 SSH 或 Conch 设备</string>
+  <string name="remote_device_page_add">添加设备</string>
+  <string name="remote_device_page_edit">编辑设备</string>
+  <string name="remote_device_page_delete">删除设备</string>
+  <string name="remote_device_page_delete_confirm">该设备将从列表中移除。</string>
+  <string name="remote_device_page_name">名称</string>
+  <string name="remote_device_page_server_url">服务器地址</string>
+  <string name="remote_device_page_api_key">API 密钥</string>
+  <string name="remote_device_page_conch_public_key">Conch 公钥（可选）</string>
+  <string name="remote_device_page_ssh_host">SSH 主机</string>
+  <string name="remote_device_page_ssh_port">SSH 端口</string>
+  <string name="remote_device_page_ssh_user">SSH 用户名</string>
+  <string name="remote_device_page_ssh_password">SSH 密码</string>
+  <string name="remote_device_detail_title">远程设备</string>
+  <string name="remote_device_detail_tab_basic">基本信息</string>
+  <string name="remote_device_detail_tab_files">文件</string>
+  <string name="remote_device_detail_type">类型</string>
+  <string name="remote_device_detail_not_found">未找到该设备。</string>
+  <string name="remote_device_detail_test_connection">测试连接</string>
+  <string name="remote_device_detail_testing">正在测试…</string>
+  <string name="remote_device_detail_empty_dir">空目录</string>
 </resources>
 
