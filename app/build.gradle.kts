@@ -198,6 +198,7 @@ dependencies {
     // okhttp
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)
+    implementation(libs.jsch)
     implementation(libs.retrofit)
     implementation(libs.retrofit.serialization.json)
 
