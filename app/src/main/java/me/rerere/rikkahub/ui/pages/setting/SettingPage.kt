@@ -50,7 +50,6 @@ import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Bookshelf01
 import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.Clapping01
-import me.rerere.hugeicons.stroke.ComputerTerminal01
 import me.rerere.hugeicons.stroke.Database02
 import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.ImageUpload
@@ -237,12 +236,6 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         leadingContent = { Icon(HugeIcons.McpServer, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_mcp_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_mcp)) },
-                    )
-                    item(
-                        onClick = { navController.navigate(Screen.SettingDevices) },
-                        leadingContent = { Icon(HugeIcons.ComputerTerminal01, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_devices_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_devices)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingWeb) },
