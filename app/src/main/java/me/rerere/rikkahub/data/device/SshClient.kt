@@ -167,6 +167,44 @@ class SshClient(
         }
     }
 
+    // ── 目录列表（远程文件浏览） ──────────────────────────
+
+    /** 远程目录条目 */
+    @kotlinx.serialization.Serializable
+    data class RemoteFileEntry(
+        val name: String,
+        val path: String,
+        val isDirectory: Boolean,
+        val sizeBytes: Long,
+        val updatedAt: Long = 0L,
+    )
+
+    /**
+     * 列出远程目录内容（SFTP ls）。失败时抛 IllegalStateException。
+     */
+    suspend fun listDirectory(path: String): List<RemoteFileEntry> = withSftp { sftp ->
+        try {
+            val dir = path.ifBlank { sftp.pwd() }
+            @Suppress("UNCHECKED_CAST")
+            val entries = sftp.ls(dir) as? List<ChannelSftp.LsEntry> ?: return@withSftp emptyList()
+            entries
+                .filter { it.filename != "." && it.filename != ".." }
+                .map { entry ->
+                    val fullPath = if (dir.endsWith("/")) "$dir${entry.filename}" else "$dir/${entry.filename}"
+                    RemoteFileEntry(
+                        name = entry.filename,
+                        path = fullPath,
+                        isDirectory = entry.attrs.isDir,
+                        sizeBytes = entry.attrs.size,
+                        updatedAt = entry.attrs.mTime * 1000L,
+                    )
+                }
+                .sortedWith(compareByDescending<RemoteFileEntry> { it.isDirectory }.thenBy { it.name.lowercase() })
+        } catch (e: Exception) {
+            throw IllegalStateException("SFTP list failed: ${e.message}")
+        }
+    }
+
     // ── file_read ──────────────────────────────────────────
 
     suspend fun fileRead(
