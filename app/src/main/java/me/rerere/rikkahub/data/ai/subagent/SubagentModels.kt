@@ -84,7 +84,6 @@ sealed class SubagentEvent {
     data class StepStarted(
         val agentId: String,
         val step: Int,
-        val maxSteps: Int,
     ) : SubagentEvent()
 
     data class ToolCall(
