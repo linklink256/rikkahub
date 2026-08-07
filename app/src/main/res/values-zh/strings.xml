@@ -1190,6 +1190,8 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="workspace_detail_tool_delete_file">删除文件</string>
   <string name="workspace_detail_tool_move_file">移动文件</string>
   <string name="workspace_detail_tool_shell">执行命令</string>
+  <string name="workspace_detail_tool_outside">工作区外（写入/编辑）</string>
+  <string name="workspace_detail_tool_outside_desc">启用后，写入/编辑 /workspace、/tmp、/agents、/skills 之外的路径需要确认；/agents（子代理）与 /skills 目录跟随上方对应工具开关</string>
   <string name="workspace_detail_install_rootfs_desc">将下载 tar.gz 并解压到 %s 的 Linux 目录。</string>
   <string name="workspace_detail_download_url">tar.gz 下载链接</string>
   <string name="workspace_detail_area_files">文件</string>
