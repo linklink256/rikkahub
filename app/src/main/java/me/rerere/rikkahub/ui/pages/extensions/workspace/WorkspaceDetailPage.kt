@@ -426,7 +426,7 @@ private fun WorkspaceToolApprovalCard(
                 )
             }
 
-            workspaceToolApprovalItems().forEach { (toolName, label) ->
+            workspaceToolApprovalItems().forEach { (toolName, label, showToolName) ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -440,13 +440,21 @@ private fun WorkspaceToolApprovalCard(
                             text = label,
                             style = MaterialTheme.typography.bodyMedium,
                         )
-                        Text(
-                            text = toolName,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        if (showToolName) {
+                            Text(
+                                text = toolName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        } else if (toolName == "workspace_outside") {
+                            Text(
+                                text = stringResource(R.string.workspace_detail_tool_outside_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                     Switch(
                         checked = resolveWorkspaceToolApproval(toolName, overrides),
@@ -461,10 +469,13 @@ private fun WorkspaceToolApprovalCard(
 
 @Composable
 private fun workspaceToolApprovalItems() = listOf(
-    "workspace_read_file" to stringResource(R.string.workspace_detail_tool_read_file),
-    "workspace_write_file" to stringResource(R.string.workspace_detail_tool_write_file),
-    "workspace_edit_file" to stringResource(R.string.workspace_detail_tool_edit_file),
-    "workspace_shell" to stringResource(R.string.workspace_detail_tool_shell),
+    Triple("workspace_read_file", stringResource(R.string.workspace_detail_tool_read_file), true),
+    Triple("workspace_write_file", stringResource(R.string.workspace_detail_tool_write_file), true),
+    Triple("workspace_edit_file", stringResource(R.string.workspace_detail_tool_edit_file), true),
+    Triple("workspace_shell", stringResource(R.string.workspace_detail_tool_shell), true),
+    // 工作区外（/workspace /tmp /agents /skills 之外的路径）写入/编辑审批开关；
+    // subagent(/agents) 与 skills(/skills) 目录视为工作区内，跟随上方对应工具开关
+    Triple("workspace_outside", stringResource(R.string.workspace_detail_tool_outside), false),
 )
 
 @Composable
