@@ -5,8 +5,8 @@ import android.util.Log
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.rikkahub.data.datastore.SettingsStore
 
 /**
  * 子代理（Subagent）角色定义管理器。
@@ -20,7 +20,9 @@ import me.rerere.ai.core.ReasoningLevel
  * group: research            # 可选，分组名，用于选择界面按组全选/部分选择；不填归入默认组
  * tools: workspace_read_file, workspace_shell, search
  * model: gemini-flash        # 可选，不填则继承主 agent 模型
- * reasoning: high            # 可选，思考档位：off/auto/low/medium/high/xhigh/max；不填默认 off
+ * maxIterations: 8           # 可选，默认 10
+ * temperature: 0.2           # 可选
+ * reasoningLevel: high       # 可选，off/auto/low/medium/high/xhigh/max，默认 off（也兼容 reasoning 键）
  * ---
  * <角色 system prompt 正文>
  * ```
@@ -33,6 +35,7 @@ class SubagentManager(
 ) {
     companion object {
         private const val TAG = "SubagentManager"
+        private const val DEFAULT_MAX_ITERATIONS = 10
         const val DEFAULT_GROUP = "default"
     }
 
@@ -180,6 +183,19 @@ class SubagentManager(
         return getAgentsDir().resolve(name)
     }
 
+    /**
+     * 解析 frontmatter 中的 `reasoningLevel` 字段（兼容 `reasoning` 别名键）。
+     *
+     * 支持 off / auto / low / medium / high / xhigh / max（大小写不敏感），
+     * 无法识别或留空时返回 null（由运行器回退到默认 off）。
+     */
+    private fun parseReasoningLevel(raw: String?): ReasoningLevel? {
+        if (raw.isNullOrBlank()) return null
+        return ReasoningLevel.entries.firstOrNull {
+            it.name.equals(raw.trim(), ignoreCase = true)
+        }
+    }
+
     private fun createTempAgentDir(agentsRoot: File, name: String, suffix: String): File? {
         repeat(100) { attempt ->
             val candidate = agentsRoot.resolve(".$name.$suffix.$attempt.tmp")
@@ -206,13 +222,11 @@ class SubagentManager(
                     ?.filter { it.isNotBlank() }
                     ?: emptyList(),
                 model = frontmatter["model"]?.takeIf { it.isNotBlank() },
-                reasoningLevel = frontmatter["reasoning"]?.trim()?.takeIf { it.isNotBlank() }?.lowercase()?.let { raw ->
-                    ReasoningLevel.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
-                        ?: run {
-                            Log.w(TAG, "parseAgentFile: Unknown reasoning level '$raw' for $name, fallback to OFF")
-                            ReasoningLevel.OFF
-                        }
-                } ?: ReasoningLevel.OFF,
+                maxIterations = frontmatter["maxIterations"]?.toIntOrNull() ?: DEFAULT_MAX_ITERATIONS,
+                temperature = frontmatter["temperature"]?.toFloatOrNull(),
+                reasoningLevel = parseReasoningLevel(
+                    frontmatter["reasoningLevel"] ?: frontmatter["reasoning"]
+                ),
                 agentDir = agentDir,
             )
         }.getOrElse {
@@ -228,7 +242,9 @@ data class SubagentMetadata(
     val group: String = SubagentManager.DEFAULT_GROUP,
     val tools: List<String> = emptyList(),
     val model: String? = null,
-    val reasoningLevel: ReasoningLevel = ReasoningLevel.OFF,
+    val maxIterations: Int = 10,
+    val temperature: Float? = null,
+    val reasoningLevel: ReasoningLevel? = null,
     val agentDir: File,
 ) {
     val agentFile: File get() = agentDir.resolve("AGENT.md")
