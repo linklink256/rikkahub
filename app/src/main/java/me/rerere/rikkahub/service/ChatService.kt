@@ -544,6 +544,31 @@ class ChatService(
                 },
                 outputTransformers = outputTransformers,
                 tools = buildList {
+                    // 子代理管理工具始终可用：主 agent 可自行创建/删除角色（类似 skills）。
+                    // 置于工具池最前，确保模型能优先看到委派能力。
+                    addAll(createSubagentManagementTools(subagentManager))
+
+                    // 系统设置查询工具：主 agent 可查看供应商/模型，为子代理指定 model
+                    addAll(createProviderSettingsTools(settingsStore))
+
+                    // 委派工具：安装子代理角色后可用；只暴露该助手已启用的角色（空集=全部启用）。
+                    // 置于工具池最前，避免被 MCP 等大量工具淹没，提高委派积极性。
+                    val enabledSubagents = runCatching {
+                        subagentManager.listSubagents().applyEnabledSubagents(assistant.enabledSubagents)
+                    }.getOrDefault(emptyList())
+                    if (enabledSubagents.isNotEmpty()) {
+                        add(
+                            createSubagentTool(
+                                subagentManager = subagentManager,
+                                subagentRunner = subagentRunner,
+                                settingsStore = settingsStore,
+                                toolPoolProvider = { toolPoolRef.get() },
+                                model = model,
+                                enabledSubagents = assistant.enabledSubagents,
+                            )
+                        )
+                    }
+
                     if (assistant.enableWebSearch) {
                         addAll(createSearchTools(settings))
                     }
@@ -587,28 +612,6 @@ class ChatService(
                                 execute = {
                                     mcpManager.callTool(serverId, tool.name, it.jsonObject)
                                 },
-                            )
-                        )
-                    }
-                    // 子代理管理工具始终可用：主 agent 可自行创建/删除角色（类似 skills）
-                    addAll(createSubagentManagementTools(subagentManager))
-
-                    // 系统设置查询工具：主 agent 可查看供应商/模型，为子代理指定 model
-                    addAll(createProviderSettingsTools(settingsStore))
-
-                    // 委派工具：安装子代理角色后可用；只暴露该助手已启用的角色（空集=全部启用）
-                    val enabledSubagents = runCatching {
-                        subagentManager.listSubagents().applyEnabledSubagents(assistant.enabledSubagents)
-                    }.getOrDefault(emptyList())
-                    if (enabledSubagents.isNotEmpty()) {
-                        add(
-                            createSubagentTool(
-                                subagentManager = subagentManager,
-                                subagentRunner = subagentRunner,
-                                settingsStore = settingsStore,
-                                toolPoolProvider = { toolPoolRef.get() },
-                                model = model,
-                                enabledSubagents = assistant.enabledSubagents,
                             )
                         )
                     }
