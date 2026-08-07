@@ -40,9 +40,6 @@ class SubagentRunner(
 ) {
     companion object {
         private const val TAG = "SubagentRunner"
-        private const val DEFAULT_TEMPERATURE = 0.2f
-        private const val DEFAULT_MAX_ITERATIONS = 10
-        private const val DEFAULT_MAX_TOKENS = 4096
         private const val DEFAULT_TIMEOUT_MILLIS = 10 * 60 * 1000L
     }
 
@@ -83,14 +80,15 @@ class SubagentRunner(
 
         try {
             withTimeout(timeoutMillis) {
-                for (step in 0 until DEFAULT_MAX_ITERATIONS) {
-                    emit(SubagentEvent.StepStarted(agentId, step + 1, DEFAULT_MAX_ITERATIONS))
-                    Log.i(TAG, "run: step ${step + 1}/${DEFAULT_MAX_ITERATIONS} ($agentId)")
+                // 无步数限制：直到模型不再调用工具（任务完成）或超时
+                var step = 0
+                while (true) {
+                    step++
+                    emit(SubagentEvent.StepStarted(agentId, step))
+                    Log.i(TAG, "run: step $step ($agentId)")
 
                     val params = TextGenerationParams(
                         model = model,
-                        temperature = DEFAULT_TEMPERATURE,
-                        maxTokens = DEFAULT_MAX_TOKENS,
                         tools = allowedTools,
                         reasoningLevel = definition.reasoningLevel ?: ReasoningLevel.OFF,
                     )
