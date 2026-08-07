@@ -438,7 +438,7 @@ private fun EditSubagentDialog(
                 label = { Text(stringResource(R.string.subagents_page_content_label)) },
                 placeholder = {
                     Text(
-                        "---\nname: scout\ndescription: \"...\"\ngroup: research\nmodel: \nreasoning: high\n---\n\n角色指令...",
+                        "---\nname: scout\ndescription: \"...\"\ngroup: research\nmodel: \nmaxIterations: 10\nreasoningLevel: high\n---\n\n角色指令...",
                         fontFamily = FontFamily.Monospace,
                     )
                 },
