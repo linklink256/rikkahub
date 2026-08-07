@@ -98,6 +98,8 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspacePage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceDetailPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceFileEditorPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalPage
+import me.rerere.rikkahub.ui.pages.extensions.remote.RemoteDeviceDetailPage
+import me.rerere.rikkahub.ui.pages.extensions.remote.RemoteDevicePage
 import me.rerere.workspace.WorkspaceStorageArea
 import me.rerere.rikkahub.ui.pages.favorite.FavoritePage
 import me.rerere.rikkahub.ui.pages.history.HistoryPage
@@ -503,6 +505,14 @@ class RouteActivity : ComponentActivity() {
                                 WorkspacePage()
                             }
 
+                            entry<Screen.RemoteDevices> {
+                                RemoteDevicePage()
+                            }
+
+                            entry<Screen.RemoteDeviceDetail> { key ->
+                                RemoteDeviceDetailPage(key.id)
+                            }
+
                             entry<Screen.WorkspaceDetail> { key ->
                                 WorkspaceDetailPage(key.id)
                             }
@@ -717,6 +727,12 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class WorkspaceDetail(val id: String) : Screen
+
+    @Serializable
+    data object RemoteDevices : Screen
+
+    @Serializable
+    data class RemoteDeviceDetail(val id: String) : Screen
 
     @Serializable
     data class WorkspaceTerminal(val id: String) : Screen

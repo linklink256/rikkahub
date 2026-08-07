@@ -26,6 +26,15 @@
 # keep jlatexmath
 -keep class org.scilab.forge.jlatexmath.** {*;}
 
+# JSch (SSH/SFTP) — R8 会裁剪 jce.Random 等运行时反射加载的类
+-keep class com.jcraft.jsch.** { *; }
+-dontwarn com.jcraft.jsch.**
+
+# okhttp — 反射加载的拦截器/平台类
+-keep class okhttp3.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
+
 -dontwarn com.google.re2j.**
 -dontobfuscate
 
