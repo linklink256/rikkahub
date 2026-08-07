@@ -20,8 +20,6 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
  * group: research            # 可选，分组名，用于选择界面按组全选/部分选择；不填归入默认组
  * tools: workspace_read_file, workspace_shell, search
  * model: gemini-flash        # 可选，不填则继承主 agent 模型
- * maxIterations: 8           # 可选，默认 10
- * temperature: 0.2           # 可选
  * reasoningLevel: high       # 可选，off/auto/low/medium/high/xhigh/max，默认 off（也兼容 reasoning 键）
  * ---
  * <角色 system prompt 正文>
@@ -35,7 +33,6 @@ class SubagentManager(
 ) {
     companion object {
         private const val TAG = "SubagentManager"
-        private const val DEFAULT_MAX_ITERATIONS = 10
         const val DEFAULT_GROUP = "default"
     }
 
@@ -222,8 +219,6 @@ class SubagentManager(
                     ?.filter { it.isNotBlank() }
                     ?: emptyList(),
                 model = frontmatter["model"]?.takeIf { it.isNotBlank() },
-                maxIterations = frontmatter["maxIterations"]?.toIntOrNull() ?: DEFAULT_MAX_ITERATIONS,
-                temperature = frontmatter["temperature"]?.toFloatOrNull(),
                 reasoningLevel = parseReasoningLevel(
                     frontmatter["reasoningLevel"] ?: frontmatter["reasoning"]
                 ),
@@ -242,8 +237,6 @@ data class SubagentMetadata(
     val group: String = SubagentManager.DEFAULT_GROUP,
     val tools: List<String> = emptyList(),
     val model: String? = null,
-    val maxIterations: Int = 10,
-    val temperature: Float? = null,
     val reasoningLevel: ReasoningLevel? = null,
     val agentDir: File,
 ) {
