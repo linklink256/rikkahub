@@ -41,12 +41,13 @@ class SubagentRunner(
     companion object {
         private const val TAG = "SubagentRunner"
         private const val DEFAULT_TEMPERATURE = 0.2f
+        private const val DEFAULT_MAX_ITERATIONS = 10
         private const val DEFAULT_MAX_TOKENS = 4096
         private const val DEFAULT_TIMEOUT_MILLIS = 10 * 60 * 1000L
     }
 
     /**
-     * @param definition   角色定义（含 tools 白名单 / model / maxIterations / reasoningLevel）
+     * @param definition   角色定义（含 tools 白名单 / model / reasoningLevel）
      * @param envelope     任务包（父 agent 委派的最小上下文）
      * @param settings     全局设置（用于定位 provider）
      * @param parentModel  主 agent 当前模型（角色未指定模型时继承其 provider）
@@ -82,13 +83,13 @@ class SubagentRunner(
 
         try {
             withTimeout(timeoutMillis) {
-                for (step in 0 until definition.maxIterations) {
-                    emit(SubagentEvent.StepStarted(agentId, step + 1, definition.maxIterations))
-                    Log.i(TAG, "run: step ${step + 1}/${definition.maxIterations} ($agentId)")
+                for (step in 0 until DEFAULT_MAX_ITERATIONS) {
+                    emit(SubagentEvent.StepStarted(agentId, step + 1, DEFAULT_MAX_ITERATIONS))
+                    Log.i(TAG, "run: step ${step + 1}/${DEFAULT_MAX_ITERATIONS} ($agentId)")
 
                     val params = TextGenerationParams(
                         model = model,
-                        temperature = definition.temperature ?: DEFAULT_TEMPERATURE,
+                        temperature = DEFAULT_TEMPERATURE,
                         maxTokens = DEFAULT_MAX_TOKENS,
                         tools = allowedTools,
                         reasoningLevel = definition.reasoningLevel ?: ReasoningLevel.OFF,
