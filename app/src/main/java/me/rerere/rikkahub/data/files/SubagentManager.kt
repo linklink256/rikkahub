@@ -212,7 +212,7 @@ class SubagentManager(
                             Log.w(TAG, "parseAgentFile: Unknown reasoning level '$raw' for $name, fallback to OFF")
                             ReasoningLevel.OFF
                         }
-                },
+                } ?: ReasoningLevel.OFF,
                 agentDir = agentDir,
             )
         }.getOrElse {
