@@ -46,7 +46,7 @@ class SubagentRunner(
     }
 
     /**
-     * @param definition   角色定义（含 tools 白名单 / model / maxIterations）
+     * @param definition   角色定义（含 tools 白名单 / model / maxIterations / reasoningLevel）
      * @param envelope     任务包（父 agent 委派的最小上下文）
      * @param settings     全局设置（用于定位 provider）
      * @param parentModel  主 agent 当前模型（角色未指定模型时继承其 provider）
@@ -91,7 +91,7 @@ class SubagentRunner(
                         temperature = definition.temperature ?: DEFAULT_TEMPERATURE,
                         maxTokens = DEFAULT_MAX_TOKENS,
                         tools = allowedTools,
-                        reasoningLevel = ReasoningLevel.OFF,
+                        reasoningLevel = definition.reasoningLevel ?: ReasoningLevel.OFF,
                     )
 
                     // 流式收集模型输出，边收边上报进度
