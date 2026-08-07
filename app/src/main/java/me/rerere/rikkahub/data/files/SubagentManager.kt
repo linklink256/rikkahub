@@ -5,6 +5,7 @@ import android.util.Log
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.rikkahub.data.datastore.SettingsStore
 
 /**
@@ -21,6 +22,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
  * model: gemini-flash        # 可选，不填则继承主 agent 模型
  * maxIterations: 8           # 可选，默认 10
  * temperature: 0.2           # 可选
+ * reasoningLevel: high       # 可选，off/auto/low/medium/high/xhigh/max，默认 off
  * ---
  * <角色 system prompt 正文>
  * ```
@@ -181,6 +183,19 @@ class SubagentManager(
         return getAgentsDir().resolve(name)
     }
 
+    /**
+     * 解析 frontmatter 中的 `reasoningLevel` 字段。
+     *
+     * 支持 off / auto / low / medium / high / xhigh / max（大小写不敏感），
+     * 无法识别或留空时返回 null（由运行器回退到默认 off）。
+     */
+    private fun parseReasoningLevel(raw: String?): ReasoningLevel? {
+        if (raw.isNullOrBlank()) return null
+        return ReasoningLevel.entries.firstOrNull {
+            it.name.equals(raw.trim(), ignoreCase = true)
+        }
+    }
+
     private fun createTempAgentDir(agentsRoot: File, name: String, suffix: String): File? {
         repeat(100) { attempt ->
             val candidate = agentsRoot.resolve(".$name.$suffix.$attempt.tmp")
@@ -209,6 +224,7 @@ class SubagentManager(
                 model = frontmatter["model"]?.takeIf { it.isNotBlank() },
                 maxIterations = frontmatter["maxIterations"]?.toIntOrNull() ?: DEFAULT_MAX_ITERATIONS,
                 temperature = frontmatter["temperature"]?.toFloatOrNull(),
+                reasoningLevel = parseReasoningLevel(frontmatter["reasoningLevel"]),
                 agentDir = agentDir,
             )
         }.getOrElse {
@@ -226,6 +242,7 @@ data class SubagentMetadata(
     val model: String? = null,
     val maxIterations: Int = 10,
     val temperature: Float? = null,
+    val reasoningLevel: ReasoningLevel? = null,
     val agentDir: File,
 ) {
     val agentFile: File get() = agentDir.resolve("AGENT.md")
