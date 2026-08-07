@@ -22,7 +22,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
  * model: gemini-flash        # 可选，不填则继承主 agent 模型
  * maxIterations: 8           # 可选，默认 10
  * temperature: 0.2           # 可选
- * reasoningLevel: high       # 可选，off/auto/low/medium/high/xhigh/max，默认 off
+ * reasoningLevel: high       # 可选，off/auto/low/medium/high/xhigh/max，默认 off（也兼容 reasoning 键）
  * ---
  * <角色 system prompt 正文>
  * ```
@@ -184,7 +184,7 @@ class SubagentManager(
     }
 
     /**
-     * 解析 frontmatter 中的 `reasoningLevel` 字段。
+     * 解析 frontmatter 中的 `reasoningLevel` 字段（兼容 `reasoning` 别名键）。
      *
      * 支持 off / auto / low / medium / high / xhigh / max（大小写不敏感），
      * 无法识别或留空时返回 null（由运行器回退到默认 off）。
@@ -224,7 +224,9 @@ class SubagentManager(
                 model = frontmatter["model"]?.takeIf { it.isNotBlank() },
                 maxIterations = frontmatter["maxIterations"]?.toIntOrNull() ?: DEFAULT_MAX_ITERATIONS,
                 temperature = frontmatter["temperature"]?.toFloatOrNull(),
-                reasoningLevel = parseReasoningLevel(frontmatter["reasoningLevel"]),
+                reasoningLevel = parseReasoningLevel(
+                    frontmatter["reasoningLevel"] ?: frontmatter["reasoning"]
+                ),
                 agentDir = agentDir,
             )
         }.getOrElse {
