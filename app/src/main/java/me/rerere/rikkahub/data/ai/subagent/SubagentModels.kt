@@ -33,6 +33,7 @@ data class TaskEnvelope(
 /**
  * 子 agent 返回的结构化结果。
  *
+ * [deliverable] 为结果块之前的完整产出物（代码/文档/内容等），供产出型角色（writer 等）传递完整输出；
  * [sections] 为角色自定义输出契约解析出的动态段落（段落名 → 列表项，不含 Summary）。
  * 默认契约的 Findings / Changes / Risks 同时映射到对应字段，向后兼容。
  */
@@ -40,6 +41,7 @@ data class TaskEnvelope(
 data class AgentResult(
     val status: AgentResultStatus = AgentResultStatus.SUCCESS,
     val summary: String = "",
+    val deliverable: String = "",
     val findings: List<String> = emptyList(),
     val changes: List<String> = emptyList(),
     val risks: List<String> = emptyList(),
@@ -49,6 +51,11 @@ data class AgentResult(
 ) {
     val toText: String
         get() = buildString {
+            // 产出物优先（结果块之前）
+            if (deliverable.isNotBlank()) {
+                appendLine(deliverable)
+                appendLine()
+            }
             appendLine("## Agent Result (${status.name})")
             if (summary.isNotBlank()) appendLine(summary)
             if (sections.isNotEmpty()) {
