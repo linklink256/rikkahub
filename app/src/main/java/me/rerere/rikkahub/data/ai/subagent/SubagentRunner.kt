@@ -75,9 +75,10 @@ class SubagentRunner(
 
         // 预填充：Google Gemini API 不允许以 assistant 消息结尾，自动禁用
         val usePrefill = prefill && providerImpl !is GoogleProvider
-        val prefillText = if (usePrefill) SubagentResultContract.PREFILL else null
+        val contract = SubagentResultContract.forRole(definition.resultFormat)
+        val prefillText = if (usePrefill) contract.prefill else null
 
-        val systemPrompt = buildSystemPrompt(definition, envelope, model, allowedTools)
+        val systemPrompt = buildSystemPrompt(definition, envelope, model, allowedTools, contract)
         var messages = buildList {
             add(UIMessage.system(systemPrompt))
             add(UIMessage.user(buildUserMessage(envelope)))
@@ -145,7 +146,7 @@ class SubagentRunner(
                 }
             }
 
-            emit(SubagentEvent.Finished(agentId, parseResult(messages, prefillText)))
+            emit(SubagentEvent.Finished(agentId, parseResult(messages, prefillText, contract)))
         } catch (e: TimeoutCancellationException) {
             Log.w(TAG, "run: timeout ($agentId)")
             emit(
@@ -219,6 +220,7 @@ class SubagentRunner(
         envelope: TaskEnvelope,
         model: Model,
         tools: List<Tool>,
+        contract: RoleContract,
     ): String = buildString {
         // 角色定义正文
         val body = runCatching {
@@ -250,9 +252,9 @@ class SubagentRunner(
             }
         }
 
-        // 输出契约：要求最终以结构化格式结束
+        // 输出契约：要求最终以结构化格式结束（支持角色自定义段落）
         appendLine()
-        append(SubagentResultContract.SYSTEM_PROMPT)
+        append(contract.systemPrompt)
     }.trim()
 
     private fun buildUserMessage(envelope: TaskEnvelope): String = buildString {
@@ -299,17 +301,17 @@ class SubagentRunner(
     /**
      * 解析子代理最终输出为结构化 [AgentResult]。
      *
-     * 优先使用 [StructuredResultParser] 按输出契约解析（Markdown 段落 / JSON），
+     * 优先使用 [StructuredResultParser] 按角色输出契约解析（Markdown 段落 / JSON），
      * 解析失败时回退为全文摘要；同时回填 token usage 与原始输出。
      */
-    private fun parseResult(messages: List<UIMessage>, prefill: String?): AgentResult {
+    private fun parseResult(messages: List<UIMessage>, prefill: String?, contract: RoleContract): AgentResult {
         val lastAssistant = messages.lastOrNull { it.role == MessageRole.ASSISTANT }
         val text = lastAssistant?.parts
             ?.filterIsInstance<UIMessagePart.Text>()
             ?.joinToString("\n") { it.text }
             ?.trim()
             .orEmpty()
-        val parsed = StructuredResultParser.parse(text, prefill)
+        val parsed = StructuredResultParser.parse(text, prefill, contract.sections)
         return parsed.copy(
             usage = lastAssistant?.usage ?: parsed.usage,
         )
