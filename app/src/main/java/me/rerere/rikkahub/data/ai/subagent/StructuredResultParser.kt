@@ -28,6 +28,8 @@ import me.rerere.rikkahub.utils.JsonInstant
  * - risk or caveat
  * ```
  * 标题也兼容 `**Agent Result (SUCCESS)**` 加粗形式；状态括号可省略（默认 SUCCESS）。
+ * 段落名可通过 [sections] 参数定制（角色在 AGENT.md 的 `resultFormat` 声明），
+ * `### Summary` 段内容并入 summary，其余段落进入 [AgentResult.sections]。
  *
  * 2. JSON 对象格式：
  * ```
@@ -42,9 +44,14 @@ object StructuredResultParser {
 
     private val STATUS_NAMES = AgentResultStatus.entries.mapTo(HashSet()) { it.name }
 
-    private val SECTION_NAMES = setOf("Summary", "Findings", "Changes", "Risks")
+    /** 默认契约的非 Summary 段落（不含 Summary，Summary 固定特殊处理） */
+    val DEFAULT_SECTIONS: List<String> = listOf("Findings", "Changes", "Risks")
 
-    fun parse(raw: String, prefill: String? = null): AgentResult {
+    fun parse(
+        raw: String,
+        prefill: String? = null,
+        sections: List<String> = DEFAULT_SECTIONS,
+    ): AgentResult {
         val text = stripPrefill(raw, prefill)
         val trimmed = text.trim()
         if (trimmed.isEmpty()) {
@@ -56,42 +63,60 @@ object StructuredResultParser {
         }
 
         // 1) JSON 对象格式
-        parseJson(trimmed, raw)?.let { return it }
+        parseJson(trimmed, raw, sections)?.let { return it }
 
         // 2) Markdown 段落格式
         return parseMarkdown(
             text = trimmed,
             defaultStatus = extractStatus(prefill) ?: AgentResultStatus.SUCCESS,
+            sections = sections,
             rawOutput = raw,
         )
     }
 
     // ---- JSON 格式 ----
 
-    private fun parseJson(text: String, rawOutput: String): AgentResult? {
+    private fun parseJson(text: String, rawOutput: String, sections: List<String>): AgentResult? {
         if (!text.startsWith("{")) return null
         val obj = runCatching { JsonInstant.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
-        val hasContractKeys = obj.keys.any { it in CONTRACT_KEYS }
+        val contractKeys = sections + "Summary"
+        val hasContractKeys = obj.keys.any { key -> contractKeys.any { it.equals(key, ignoreCase = true) } }
         if (!hasContractKeys) return null
+
+        val parsedSections = linkedMapOf<String, List<String>>()
+        sections.forEach { section ->
+            val values = obj.stringList(section)
+            if (values.isNotEmpty()) {
+                parsedSections[section] = values
+            }
+        }
         return AgentResult(
-            status = obj["status"]?.jsonPrimitive?.contentOrNull?.let { parseStatus(it) }
+            status = obj.stringValue("status")?.let { parseStatus(it) }
                 ?: AgentResultStatus.SUCCESS,
-            summary = obj["summary"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-            findings = obj.stringList("findings"),
-            changes = obj.stringList("changes"),
-            risks = obj.stringList("risks"),
+            summary = obj.stringValue("summary").orEmpty(),
+            sections = parsedSections,
             rawOutput = rawOutput,
-        )
+        ).also { it.fillLegacyFields() }
     }
 
-    private fun JsonObject.stringList(key: String): List<String> =
-        this[key]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+    /** 按键名大小写不敏感读取字符串值 */
+    private fun JsonObject.stringValue(key: String): String? {
+        val actualKey = keys.firstOrNull { it.equals(key, ignoreCase = true) } ?: return null
+        return this[actualKey]?.jsonPrimitive?.contentOrNull
+    }
+
+    /** 按键名大小写不敏感读取字符串列表 */
+    private fun JsonObject.stringList(key: String): List<String> {
+        val actualKey = keys.firstOrNull { it.equals(key, ignoreCase = true) } ?: return emptyList()
+        return this[actualKey]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+    }
 
     // ---- Markdown 段落格式 ----
 
     private fun parseMarkdown(
         text: String,
         defaultStatus: AgentResultStatus,
+        sections: List<String>,
         rawOutput: String,
     ): AgentResult {
         val lines = text.lines()
@@ -105,13 +130,14 @@ object StructuredResultParser {
 
         // 分段收集：标题行之后、或（无标题时）全文，按 ### 段标题切分
         val start = if (titleIndex >= 0) titleIndex + 1 else 0
-        val sections = linkedMapOf<String, MutableList<String>>()
+        val sectionItems = linkedMapOf<String, MutableList<String>>()
         var currentSection: String? = null
         var summaryLines = mutableListOf<String>()
+        val summarySection = sections.firstOrNull { it.equals("Summary", ignoreCase = true) }
 
         for (i in start until lines.size) {
             val line = lines[i].trim()
-            val section = line.sectionName()
+            val section = line.sectionName(sections)
             if (section != null) {
                 currentSection = section
                 continue
@@ -119,19 +145,40 @@ object StructuredResultParser {
             if (line.isBlank()) continue
             if (currentSection == null) {
                 summaryLines.add(line)
+            } else if (currentSection.equals("Summary", ignoreCase = true)) {
+                // `### Summary` 段内容并入 summary
+                summaryLines.add(line)
             } else {
-                sections.getOrPut(currentSection) { mutableListOf() }.add(line)
+                sectionItems.getOrPut(currentSection) { mutableListOf() }.add(line)
+            }
+        }
+
+        val parsedSections = linkedMapOf<String, List<String>>()
+        sections.forEach { section ->
+            val items = sectionItems[section].orEmpty().map { it.stripListMarker() }
+            if (items.isNotEmpty()) {
+                parsedSections[section] = items
             }
         }
 
         return AgentResult(
             status = status,
             summary = summaryLines.joinToString("\n").trim(),
-            findings = sections["Findings"].orEmpty().map { it.stripListMarker() },
-            changes = sections["Changes"].orEmpty().map { it.stripListMarker() },
-            risks = sections["Risks"].orEmpty().map { it.stripListMarker() },
+            sections = parsedSections,
             rawOutput = rawOutput,
-        )
+        ).also { it.fillLegacyFields() }
+    }
+
+    /** 把默认契约段 Findings/Changes/Risks 同步到兼容字段 */
+    private fun AgentResult.fillLegacyFields(): AgentResult {
+        val findings = sections.entries.firstOrNull { it.key.equals("Findings", ignoreCase = true) }?.value.orEmpty()
+        val changes = sections.entries.firstOrNull { it.key.equals("Changes", ignoreCase = true) }?.value.orEmpty()
+        val risks = sections.entries.firstOrNull { it.key.equals("Risks", ignoreCase = true) }?.value.orEmpty()
+        return if (findings.isNotEmpty() || changes.isNotEmpty() || risks.isNotEmpty()) {
+            copy(findings = findings, changes = changes, risks = risks)
+        } else {
+            this
+        }
     }
 
     /** 匹配 `## Agent Result (SUCCESS)` / `## Agent Result` / `**Agent Result (SUCCESS)**` 等标题行 */
@@ -157,12 +204,12 @@ object StructuredResultParser {
         return AgentResultStatus.entries.firstOrNull { it.name == upper }
     }
 
-    /** 匹配 `### Summary` / `### Findings` / `### Changes` / `### Risks` 段标题（大小写不敏感） */
-    private fun String.sectionName(): String? {
+    /** 匹配 `### Summary` / `### Findings` / `### Changes` / `### Risks` 等段标题（按角色契约段落名，大小写不敏感） */
+    private fun String.sectionName(sections: List<String>): String? {
         val compact = trim().replace("*", "")
         if (!compact.startsWith("###", ignoreCase = true)) return null
         val name = compact.removePrefix("###").trim().trimEnd(':').trim()
-        return SECTION_NAMES.firstOrNull { it.equals(name, ignoreCase = true) }
+        return (sections + "Summary").firstOrNull { it.equals(name, ignoreCase = true) }
     }
 
     /** 去掉 `- ` / `* ` / `1. ` 等列表标记 */
@@ -189,41 +236,76 @@ object StructuredResultParser {
         }
         return raw
     }
-
-    private val CONTRACT_KEYS = setOf("status", "summary", "findings", "changes", "risks")
 }
 
 /**
  * 子代理输出契约：注入 system prompt 与 prefill 引导，
  * 使子代理最终输出可被 [StructuredResultParser] 稳定解析。
+ *
+ * 角色可在 AGENT.md frontmatter 中用 `resultFormat` 自定义段落名（逗号分隔），
+ * 例如 `resultFormat: Summary, Bugs, Security, Suggestions`；
+ * 未声明时使用默认契约（Summary / Findings / Changes / Risks）。
  */
 object SubagentResultContract {
 
-    /** 追加到子代理 system prompt 尾部的格式说明 */
-    val SYSTEM_PROMPT: String = """
-        ## Output Contract
-        When the task is finished, end your response with a structured result in EXACTLY this format:
+    const val TITLE: String = "## Agent Result (SUCCESS)"
 
-        ## Agent Result (SUCCESS)
+    /** 默认契约：Summary + Findings/Changes/Risks */
+    fun default(): RoleContract = forRole(null)
 
-        <concise summary of what was done>
+    /**
+     * 根据角色的 `resultFormat` 生成契约。
+     *
+     * 解析规则：按逗号分隔段落名，过滤空项；未声明或解析为空时回退默认契约。
+     * 段落名保留用户写法，匹配时大小写不敏感；Summary 段自动特殊处理（内容并入 summary）。
+     */
+    fun forRole(resultFormat: String?): RoleContract {
+        val sections = resultFormat
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            .orEmpty()
+            .let { list ->
+                if (list.isEmpty()) DEFAULT_SECTIONS else list
+            }
+        return RoleContract(
+            sections = sections,
+            systemPrompt = buildSystemPrompt(sections),
+            prefill = PREFILL,
+        )
+    }
 
-        ### Findings
-        - <key finding>
+    private val DEFAULT_SECTIONS: List<String> = listOf("Findings", "Changes", "Risks")
 
-        ### Changes
-        - <file or behavior change>
-
-        ### Risks
-        - <risk or caveat>
-
-        Rules:
-        - Replace SUCCESS with FAILED if the task could not be completed.
-        - Omit any section that has no items (e.g. no Risks).
-        - Keep every item on one line prefixed with "- ".
-        - You may include working notes BEFORE the "## Agent Result" block; only the block is parsed.
-    """.trimIndent()
+    private fun buildSystemPrompt(sections: List<String>): String = buildString {
+        appendLine("## Output Contract")
+        appendLine("When the task is finished, end your response with a structured result in EXACTLY this format:")
+        appendLine()
+        appendLine(TITLE)
+        appendLine()
+        appendLine("<concise summary of what was done>")
+        sections.forEach { section ->
+            if (!section.equals("Summary", ignoreCase = true)) {
+                appendLine()
+                appendLine("### $section")
+                appendLine("- <item>")
+            }
+        }
+        appendLine()
+        appendLine("Rules:")
+        appendLine("- Replace SUCCESS with FAILED if the task could not be completed.")
+        appendLine("- Omit any section that has no items.")
+        appendLine("- Keep every item on one line prefixed with \"- \".")
+        appendLine("- You may include working notes BEFORE the \"## Agent Result\" block; only the block is parsed.")
+    }.trim()
 
     /** assistant 预填充消息：引导模型从结构化结果开头续写 */
     const val PREFILL: String = "## Agent Result (SUCCESS)\n\n"
 }
+
+/** 角色级输出契约：自定义段落名 + 注入 system prompt 的格式说明 + prefill */
+data class RoleContract(
+    val sections: List<String>,
+    val systemPrompt: String,
+    val prefill: String,
+)
