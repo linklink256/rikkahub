@@ -70,6 +70,8 @@ fun createSubagentTool(
             HOW TO DELEGATE:
             - Pick the best matching role; if unsure, pick the closest one and describe the task precisely.
             - Provide a self-contained `task`; include only a minimal `context` summary, never the full history.
+            - Subagents have NO memory of previous calls: if the task references an earlier step (e.g. "execute the decision
+              from the previous round"), pass that decision inside `context` — do not assume the subagent remembers it.
             - For independent subtasks use mode=parallel (max 8 subtasks); for sequential handoffs use mode=chain.
             - Set `boundary` and `acceptance` to constrain the subagent and verify its result.
 
@@ -215,7 +217,9 @@ fun createSubagentTool(
                         context = context,
                         acceptance = acceptance,
                     )
-                    listOf(runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool, log))
+                    val (result, logText) = runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool)
+                    log.append(logText)
+                    listOf(result)
                 }
 
                 SubagentMode.PARALLEL -> {
@@ -225,7 +229,8 @@ fun createSubagentTool(
                     }
                     log.appendLine("== Parallel (${tasks.size} subtasks, concurrency $PARALLEL_CONCURRENCY) ==")
                     val semaphore = Semaphore(PARALLEL_CONCURRENCY)
-                    coroutineScope {
+                    // 每个子任务使用独立日志（StringBuilder 非线程安全，并发写同一实例会崩溃）
+                    val pairs = coroutineScope {
                         tasks.map { subtask ->
                             async {
                                 semaphore.withPermit {
@@ -236,11 +241,17 @@ fun createSubagentTool(
                                         context = context,
                                         acceptance = acceptance,
                                     )
-                                    runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool, log)
+                                    runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool)
                                 }
                             }
                         }.awaitAll()
                     }
+                    pairs.forEachIndexed { index, (result, logText) ->
+                        log.appendLine()
+                        log.appendLine("-- Subtask ${index + 1}/${pairs.size} --")
+                        log.append(logText)
+                    }
+                    pairs.map { it.first }
                 }
 
                 SubagentMode.CHAIN -> {
@@ -249,6 +260,7 @@ fun createSubagentTool(
                     val chainResults = mutableListOf<AgentResult>()
                     var previous: AgentResult? = null
                     tasks.forEachIndexed { index, subtask ->
+                        log.appendLine()
                         log.appendLine("-- Step ${index + 1}/${tasks.size} --")
                         val envelope = TaskEnvelope(
                             role = role,
@@ -257,7 +269,8 @@ fun createSubagentTool(
                             context = previous?.toText?.let { "$context\n\n## Previous step result\n$it" } ?: context,
                             acceptance = acceptance,
                         )
-                        val result = runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool, log)
+                        val (result, logText) = runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool)
+                        log.append(logText)
                         chainResults += result
                         previous = result
                     }
@@ -287,8 +300,9 @@ private suspend fun runAndCollect(
     settings: me.rerere.rikkahub.data.datastore.Settings,
     model: Model,
     toolPool: List<Tool>,
-    log: StringBuilder,
-): AgentResult {
+): Pair<AgentResult, String> {
+    // 每个调用独立日志（StringBuilder 非线程安全；并行模式共享实例会崩溃）
+    val log = StringBuilder()
     var result = AgentResult(status = AgentResultStatus.FAILED, summary = "(no result)")
     runner.run(
         definition = definition,
@@ -307,7 +321,7 @@ private suspend fun runAndCollect(
             is SubagentEvent.Failed -> log.appendLine("  ✗ ${event.error}")
         }
     }
-    return result
+    return result to log.toString()
 }
 
 private fun errorText(message: String): List<UIMessagePart> = listOf(
