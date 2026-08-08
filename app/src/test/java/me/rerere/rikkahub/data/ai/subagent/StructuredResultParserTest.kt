@@ -239,6 +239,46 @@ class StructuredResultParserTest {
     }
 
     @Test
+    fun `forRole with raw marker returns raw contract`() {
+        val contract = SubagentResultContract.forRole("raw")
+
+        assertTrue(contract.raw)
+        assertEquals(emptyList<String>(), contract.sections)
+        assertEquals("", contract.systemPrompt)
+        assertEquals("", contract.prefill)
+    }
+
+    @Test
+    fun `forRole with Raw case-insensitive returns raw contract`() {
+        val contract = SubagentResultContract.forRole("Raw")
+
+        assertTrue(contract.raw)
+    }
+
+    @Test
+    fun `raw mode parse returns content untouched`() {
+        val raw = "这是一段纯文本内容。\n\n第二段：无需任何结构化包装。\n```\n代码块也原样保留\n```"
+        val result = StructuredResultParser.parse(raw, rawMode = true)
+
+        assertTrue(result.raw)
+        assertEquals(raw, result.deliverable)
+        assertEquals(raw, result.summary)
+        assertTrue(result.findings.isEmpty())
+        assertTrue(result.sections.isEmpty())
+    }
+
+    @Test
+    fun `raw mode toText returns content without result block wrapper`() {
+        val raw = "纯文本内容，包含 ## Agent Result (SUCCESS) 字样也不被解析"
+        val result = StructuredResultParser.parse(raw, rawMode = true)
+
+        val text = result.toText
+
+        // raw 模式：无 `## Agent Result` 包装（内容里的字样是原文，不是解析产物）
+        assertEquals(raw, text)
+    }
+
+    @Test
     fun `contract prompt requires deliverable first then result block`() {
         val contract = SubagentResultContract.forRole(null)
 
