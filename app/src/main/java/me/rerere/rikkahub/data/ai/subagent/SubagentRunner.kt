@@ -288,7 +288,11 @@ class SubagentRunner(
         }
 
         if (toolDef.needsApproval(args)) {
-            return errorOutput("Tool ${tool.toolName} requires user approval, skipped in subagent")
+            return errorOutput(buildString {
+                appendLine("Tool '${tool.toolName}' requires user approval and was skipped in subagent (subagents have no approval UI).")
+                appendLine("Hint: workspace_* approval switches are configured per workspace. To let subagents use this tool, " +
+                    "turn off its approval switch in the workspace settings (e.g. workspace_shell approval).")
+            })
         }
 
         return runCatching {
