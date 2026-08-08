@@ -118,6 +118,7 @@ fun createSubagentTool(
                                 appendLine("      <tools>${s.tools.joinToString(", ")}</tools>")
                             }
                             s.model?.let { appendLine("      <model>$it</model>") }
+                            s.resultFormat?.let { appendLine("      <resultFormat>$it</resultFormat>") }
                             appendLine("    </subagent>")
                         }
                         appendLine("  </group>")
