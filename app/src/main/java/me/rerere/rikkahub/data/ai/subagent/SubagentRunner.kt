@@ -77,8 +77,8 @@ class SubagentRunner(
 
         // 预填充：默认关闭（避免抢占产出物）；raw 模式强制关闭；
         // 仅显式开启且非 Google provider 时注入。Google Gemini API 不允许以 assistant 消息结尾，自动禁用
-        val usePrefill = prefill && !contract.raw && providerImpl !is GoogleProvider
         val contract = SubagentResultContract.forRole(definition.resultFormat)
+        val usePrefill = prefill && !contract.raw && providerImpl !is GoogleProvider
         val prefillText = if (usePrefill) contract.prefill else null
 
         val systemPrompt = buildSystemPrompt(definition, envelope, model, allowedTools, contract)
