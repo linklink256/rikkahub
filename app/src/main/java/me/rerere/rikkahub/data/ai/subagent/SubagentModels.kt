@@ -32,6 +32,9 @@ data class TaskEnvelope(
 
 /**
  * 子 agent 返回的结构化结果。
+ *
+ * [sections] 为角色自定义输出契约解析出的动态段落（段落名 → 列表项，不含 Summary）。
+ * 默认契约的 Findings / Changes / Risks 同时映射到对应字段，向后兼容。
  */
 @Serializable
 data class AgentResult(
@@ -40,6 +43,7 @@ data class AgentResult(
     val findings: List<String> = emptyList(),
     val changes: List<String> = emptyList(),
     val risks: List<String> = emptyList(),
+    val sections: Map<String, List<String>> = emptyMap(),
     val usage: TokenUsage? = null,
     val rawOutput: String = "",
 ) {
@@ -47,22 +51,30 @@ data class AgentResult(
         get() = buildString {
             appendLine("## Agent Result (${status.name})")
             if (summary.isNotBlank()) appendLine(summary)
-            if (findings.isNotEmpty()) {
-                appendLine()
-                appendLine("### Findings")
-                findings.forEach { appendLine("- $it") }
-            }
-            if (changes.isNotEmpty()) {
-                appendLine()
-                appendLine("### Changes")
-                changes.forEach { appendLine("- $it") }
-            }
-            if (risks.isNotEmpty()) {
-                appendLine()
-                appendLine("### Risks")
-                risks.forEach { appendLine("- $it") }
+            if (sections.isNotEmpty()) {
+                // 自定义契约段落（含默认 Findings/Changes/Risks）
+                sections.forEach { (name, items) ->
+                    if (items.isNotEmpty()) {
+                        appendLine()
+                        appendLine("### $name")
+                        items.forEach { appendLine("- $it") }
+                    }
+                }
+            } else {
+                // 回退：无 sections 时输出旧字段（兼容直接构造的结果）
+                appendSection("Findings", findings)
+                appendSection("Changes", changes)
+                appendSection("Risks", risks)
             }
         }.trim()
+
+    private fun StringBuilder.appendSection(name: String, items: List<String>) {
+        if (items.isNotEmpty()) {
+            appendLine()
+            appendLine("### $name")
+            items.forEach { appendLine("- $it") }
+        }
+    }
 }
 
 enum class AgentResultStatus {
