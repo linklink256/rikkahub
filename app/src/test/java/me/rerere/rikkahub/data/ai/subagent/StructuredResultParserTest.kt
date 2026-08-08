@@ -244,8 +244,10 @@ class StructuredResultParserTest {
 
         assertTrue(contract.raw)
         assertEquals(emptyList<String>(), contract.sections)
-        assertEquals("", contract.systemPrompt)
         assertEquals("", contract.prefill)
+        // raw 模式注入防御性纯文本指令（压制模型自发结构化）
+        assertTrue(contract.systemPrompt.contains("PLAIN TEXT"))
+        assertTrue(contract.systemPrompt.contains("No result block"))
     }
 
     @Test
