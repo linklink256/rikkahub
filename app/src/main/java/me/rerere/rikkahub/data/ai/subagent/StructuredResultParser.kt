@@ -275,6 +275,19 @@ object SubagentResultContract {
     /** `resultFormat: raw` 特殊值：纯文本输出，跳过所有结构化处理 */
     private const val RAW_MARKER = "raw"
 
+    /**
+     * raw 模式的防御性输出指令：不要求结构化，反而主动压制模型自发的结构化倾向
+     * （部分模型在敏感内容下会自行套用 "## Agent Result" 报告格式）。
+     */
+    private val RAW_OUTPUT_INSTRUCTION: String = buildString {
+        appendLine("## Output Style")
+        appendLine("Output your response as PLAIN TEXT content only — the content itself IS the deliverable.")
+        appendLine("Do NOT wrap it in any structured format:")
+        appendLine("- No result block like \"## Agent Result\", \"### Summary\" or other \"### Section\" headers.")
+        appendLine("- No JSON, no markdown report, no bullet-point summary at the end.")
+        appendLine("Just write the content directly from the first line to the last.")
+    }.trim()
+
     /** 默认契约：Summary + Findings/Changes/Risks */
     fun default(): RoleContract = forRole(null)
 
@@ -289,7 +302,7 @@ object SubagentResultContract {
         if (resultFormat?.trim()?.equals(RAW_MARKER, ignoreCase = true) == true) {
             return RoleContract(
                 sections = emptyList(),
-                systemPrompt = "",
+                systemPrompt = RAW_OUTPUT_INSTRUCTION,
                 prefill = "",
                 raw = true,
             )
