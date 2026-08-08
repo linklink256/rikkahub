@@ -1196,8 +1196,6 @@
   <string name="workspace_detail_tool_delete_file">Delete File</string>
   <string name="workspace_detail_tool_move_file">Move File</string>
   <string name="workspace_detail_tool_shell">Execute Command</string>
-  <string name="workspace_detail_tool_outside">Outside Workspace (write/edit)</string>
-  <string name="workspace_detail_tool_outside_desc">When enabled, writing/editing paths outside /workspace, /tmp, /agents and /skills requires confirmation; /agents (subagents) and /skills follow the tool switches above</string>
   <string name="workspace_detail_install_rootfs_desc">Will download tar.gz and extract to the linux directory of %s.</string>
   <string name="workspace_detail_download_url">tar.gz download URL</string>
   <string name="workspace_detail_area_files">Files</string>
