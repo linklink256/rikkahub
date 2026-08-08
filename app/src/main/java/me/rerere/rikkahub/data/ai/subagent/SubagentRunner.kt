@@ -128,7 +128,7 @@ class SubagentRunner(
                     // 执行工具（子 agent 不弹审批，直接执行或按需跳过）
                     val executedTools = toolsToProcess.map { tool ->
                         emit(SubagentEvent.ToolCall(agentId, tool.toolName, tool.input))
-                        val output = executeTool(tool, allowedTools)
+                        val output = executeTool(tool, allowedTools, definition)
                         val summary = output
                             .filterIsInstance<UIMessagePart.Text>()
                             .joinToString(" ") { it.text }
@@ -271,9 +271,15 @@ class SubagentRunner(
     private suspend fun executeTool(
         tool: UIMessagePart.Tool,
         allowedTools: List<Tool>,
+        definition: SubagentMetadata,
     ): List<UIMessagePart> {
         val toolDef = allowedTools.find { it.name == tool.toolName }
-            ?: return errorOutput("Tool ${tool.toolName} is not in the allowed tool list")
+            ?: return errorOutput(buildString {
+                appendLine("Tool '${tool.toolName}' is not available in the subagent tool pool.")
+                appendLine("Declared in AGENT.md tools: ${definition.tools.joinToString(", ").ifEmpty { "(all inherited from parent session)" }}")
+                appendLine("Available tools: ${allowedTools.joinToString { it.name }.ifEmpty { "(none)" }}")
+                appendLine("Hint: workspace_* tools exist only when the assistant is bound to a workspace whose shell is READY. Check the parent session's Workspace settings; or declare only tools that exist in the parent session.")
+            })
 
         val args: JsonElement = runCatching {
             JsonInstant.parseToJsonElement(tool.input.ifBlank { "{}" })
