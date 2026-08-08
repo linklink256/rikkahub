@@ -41,6 +41,7 @@ data class AgentResult(
     val changes: List<String> = emptyList(),
     val risks: List<String> = emptyList(),
     val usage: TokenUsage? = null,
+    val rawOutput: String = "",
 ) {
     val toText: String
         get() = buildString {
