@@ -28,9 +28,6 @@ val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_write_file" to false,
     "workspace_edit_file" to false,
     "workspace_shell" to true,
-    // 工作区外（/workspace /tmp /agents /skills 之外的路径）的写入/编辑默认需要审批；
-    // 可在审批开关中关闭。subagent(/agents) 与 skills(/skills) 目录视为工作区内，跟随对应工具开关。
-    "workspace_outside" to true,
 )
 
 fun resolveWorkspaceToolApproval(name: String, overrides: Map<String, Boolean>): Boolean =
@@ -44,15 +41,13 @@ suspend fun createWorkspaceTools(
     if (workspaceId.isNullOrBlank()) return emptyList()
     val approvalOverrides = workspaceRepository.getById(workspaceId)?.toolApprovalOverrides().orEmpty()
     fun needsApproval(name: String) = resolveWorkspaceToolApproval(name, approvalOverrides)
-    // 工作区外审批开关：false 时关闭 /workspace /tmp /agents /skills 之外路径的强制审批
-    val requireApprovalOutside = resolveWorkspaceToolApproval("workspace_outside", approvalOverrides)
 
     val shellCwd = cwd?.removePrefix("/workspace/")?.removePrefix("/workspace")
 
     return listOf(
         createReadFileTool(workspaceId, ::needsApproval, workspaceRepository),
-        createWriteFileTool(workspaceId, ::needsApproval, requireApprovalOutside, workspaceRepository),
-        createEditFileTool(workspaceId, ::needsApproval, requireApprovalOutside, workspaceRepository),
+        createWriteFileTool(workspaceId, ::needsApproval, workspaceRepository),
+        createEditFileTool(workspaceId, ::needsApproval, workspaceRepository),
         createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd),
     )
 }
@@ -105,7 +100,6 @@ private fun createReadFileTool(
 private fun createWriteFileTool(
     workspaceId: String,
     needsApproval: (String) -> Boolean,
-    requireApprovalOutside: Boolean,
     workspaceRepository: WorkspaceRepository,
 ) = Tool(
     name = "workspace_write_file",
@@ -129,10 +123,7 @@ private fun createWriteFileTool(
             required = listOf("path", "text"),
         )
     },
-    needsApproval = {
-        needsApproval("workspace_write_file") ||
-            (requireApprovalOutside && it.pathOutsideWritableRoots("path"))
-    },
+    needsApproval = { needsApproval("workspace_write_file") },
     execute = {
         val params = it.jsonObject
         val path = params.absolutePath("path")
@@ -146,7 +137,6 @@ private fun createWriteFileTool(
 private fun createEditFileTool(
     workspaceId: String,
     needsApproval: (String) -> Boolean,
-    requireApprovalOutside: Boolean,
     workspaceRepository: WorkspaceRepository,
 ) = Tool(
     name = "workspace_edit_file",
@@ -176,10 +166,7 @@ private fun createEditFileTool(
             required = listOf("path", "old_text", "new_text"),
         )
     },
-    needsApproval = {
-        needsApproval("workspace_edit_file") ||
-            (requireApprovalOutside && it.pathOutsideWritableRoots("path"))
-    },
+    needsApproval = { needsApproval("workspace_edit_file") },
     execute = {
         val params = it.jsonObject
         val path = params.absolutePath("path")
@@ -415,23 +402,6 @@ private fun kotlinx.serialization.json.JsonObject.absolutePath(name: String): St
     require(path.startsWith("/")) { "$name must be an absolute path inside Rootfs" }
     require(!path.contains('\u0000')) { "$name contains invalid character" }
     return path
-}
-
-// 免强制审批的可写安全区: 工作区文件目录, 以及临时目录 /tmp
-// /workspace、/tmp 为工作区可写根；/agents(subagent) 与 /skills 目录视为工作区内，
-// 写入/编辑跟随对应工具开关，不额外强制审批。
-private val WRITABLE_ROOT_PREFIXES = listOf("/workspace", "/tmp", "/agents", "/skills")
-
-private fun kotlinx.serialization.json.JsonElement.pathOutsideWritableRoots(name: String): Boolean =
-    runCatching {
-        jsonObject.absolutePath(name).isOutsideWritableRoots()
-    }.getOrDefault(true)
-
-private fun String.isOutsideWritableRoots(): Boolean {
-    val normalized = trimEnd('/').ifBlank { "/" }
-    return WRITABLE_ROOT_PREFIXES.none { prefix ->
-        normalized == prefix || normalized.startsWith("$prefix/")
-    }
 }
 
 private fun String.rootfsName(): String =
