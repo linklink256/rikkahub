@@ -75,9 +75,9 @@ class SubagentRunner(
             definition.tools.isEmpty() || it.name in definition.tools
         }
 
-        // 预填充：默认关闭（避免抢占产出物）；仅显式开启且非 Google provider 时注入。
-        // Google Gemini API 不允许以 assistant 消息结尾，自动禁用
-        val usePrefill = prefill && providerImpl !is GoogleProvider
+        // 预填充：默认关闭（避免抢占产出物）；raw 模式强制关闭；
+        // 仅显式开启且非 Google provider 时注入。Google Gemini API 不允许以 assistant 消息结尾，自动禁用
+        val usePrefill = prefill && !contract.raw && providerImpl !is GoogleProvider
         val contract = SubagentResultContract.forRole(definition.resultFormat)
         val prefillText = if (usePrefill) contract.prefill else null
 
@@ -255,9 +255,11 @@ class SubagentRunner(
             }
         }
 
-        // 输出契约：要求最终以结构化格式结束（支持角色自定义段落）
-        appendLine()
-        append(contract.systemPrompt)
+        // 输出契约：要求最终以结构化格式结束（支持角色自定义段落；raw 模式为空，不注入）
+        if (contract.systemPrompt.isNotBlank()) {
+            appendLine()
+            append(contract.systemPrompt)
+        }
     }.trim()
 
     private fun buildUserMessage(envelope: TaskEnvelope): String = buildString {
@@ -305,6 +307,7 @@ class SubagentRunner(
      * 解析子代理最终输出为结构化 [AgentResult]。
      *
      * 优先使用 [StructuredResultParser] 按角色输出契约解析（Markdown 段落 / JSON），
+     * raw 模式（`resultFormat: raw`）跳过解析、内容原样返回；
      * 解析失败时回退为全文摘要；同时回填 token usage 与原始输出。
      */
     private fun parseResult(messages: List<UIMessage>, prefill: String?, contract: RoleContract): AgentResult {
@@ -314,7 +317,7 @@ class SubagentRunner(
             ?.joinToString("\n") { it.text }
             ?.trim()
             .orEmpty()
-        val parsed = StructuredResultParser.parse(text, prefill, contract.sections)
+        val parsed = StructuredResultParser.parse(text, prefill, contract.sections, rawMode = contract.raw)
         return parsed.copy(
             usage = lastAssistant?.usage ?: parsed.usage,
         )
