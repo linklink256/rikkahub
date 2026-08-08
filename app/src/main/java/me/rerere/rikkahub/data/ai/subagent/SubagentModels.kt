@@ -35,6 +35,7 @@ data class TaskEnvelope(
  *
  * [deliverable] 为结果块之前的完整产出物（代码/文档/内容等），供产出型角色（writer 等）传递完整输出；
  * [sections] 为角色自定义输出契约解析出的动态段落（段落名 → 列表项，不含 Summary）。
+ * [raw] 为 raw 模式标记（`resultFormat: raw`）：不注入任何输出契约，内容原样返回，不做结构化包装。
  * 默认契约的 Findings / Changes / Risks 同时映射到对应字段，向后兼容。
  */
 @Serializable
@@ -46,34 +47,41 @@ data class AgentResult(
     val changes: List<String> = emptyList(),
     val risks: List<String> = emptyList(),
     val sections: Map<String, List<String>> = emptyMap(),
+    val raw: Boolean = false,
     val usage: TokenUsage? = null,
     val rawOutput: String = "",
 ) {
     val toText: String
-        get() = buildString {
-            // 产出物优先（结果块之前）
-            if (deliverable.isNotBlank()) {
-                appendLine(deliverable)
-                appendLine()
+        get() {
+            // raw 模式：不做任何结构化包装，原样返回内容
+            if (raw) {
+                return deliverable.ifBlank { summary }
             }
-            appendLine("## Agent Result (${status.name})")
-            if (summary.isNotBlank()) appendLine(summary)
-            if (sections.isNotEmpty()) {
-                // 自定义契约段落（含默认 Findings/Changes/Risks）
-                sections.forEach { (name, items) ->
-                    if (items.isNotEmpty()) {
-                        appendLine()
-                        appendLine("### $name")
-                        items.forEach { appendLine("- $it") }
-                    }
+            return buildString {
+                // 产出物优先（结果块之前）
+                if (deliverable.isNotBlank()) {
+                    appendLine(deliverable)
+                    appendLine()
                 }
-            } else {
-                // 回退：无 sections 时输出旧字段（兼容直接构造的结果）
-                appendSection("Findings", findings)
-                appendSection("Changes", changes)
-                appendSection("Risks", risks)
-            }
-        }.trim()
+                appendLine("## Agent Result (${status.name})")
+                if (summary.isNotBlank()) appendLine(summary)
+                if (sections.isNotEmpty()) {
+                    // 自定义契约段落（含默认 Findings/Changes/Risks）
+                    sections.forEach { (name, items) ->
+                        if (items.isNotEmpty()) {
+                            appendLine()
+                            appendLine("### $name")
+                            items.forEach { appendLine("- $it") }
+                        }
+                    }
+                } else {
+                    // 回退：无 sections 时输出旧字段（兼容直接构造的结果）
+                    appendSection("Findings", findings)
+                    appendSection("Changes", changes)
+                    appendSection("Risks", risks)
+                }
+            }.trim()
+        }
 
     private fun StringBuilder.appendSection(name: String, items: List<String>) {
         if (items.isNotEmpty()) {
