@@ -128,6 +128,13 @@ object StructuredResultParser {
             defaultStatus
         }
 
+        // 结果块之前的完整产出物（writer 类角色的代码/文档/内容）
+        val deliverable = if (titleIndex > 0) {
+            lines.take(titleIndex).joinToString("\n").trim()
+        } else {
+            ""
+        }
+
         // 分段收集：标题行之后、或（无标题时）全文，按 ### 段标题切分
         val start = if (titleIndex >= 0) titleIndex + 1 else 0
         val sectionItems = linkedMapOf<String, MutableList<String>>()
@@ -164,6 +171,7 @@ object StructuredResultParser {
         return AgentResult(
             status = status,
             summary = summaryLines.joinToString("\n").trim(),
+            deliverable = deliverable,
             sections = parsedSections,
             rawOutput = rawOutput,
         ).also { it.fillLegacyFields() }
@@ -279,7 +287,8 @@ object SubagentResultContract {
 
     private fun buildSystemPrompt(sections: List<String>): String = buildString {
         appendLine("## Output Contract")
-        appendLine("When the task is finished, end your response with a structured result in EXACTLY this format:")
+        appendLine("Write your FULL deliverable (code, document, content, etc.) FIRST — do not abbreviate it. ")
+        appendLine("Then end your response with a structured result block in EXACTLY this format:")
         appendLine()
         appendLine(TITLE)
         appendLine()
@@ -296,7 +305,8 @@ object SubagentResultContract {
         appendLine("- Replace SUCCESS with FAILED if the task could not be completed.")
         appendLine("- Omit any section that has no items.")
         appendLine("- Keep every item on one line prefixed with \"- \".")
-        appendLine("- You may include working notes BEFORE the \"## Agent Result\" block; only the block is parsed.")
+        appendLine("- Only the result block is parsed: the full deliverable and any notes BEFORE it are preserved and returned to the caller.")
+        appendLine("- The result block summary must stay SHORT — never replace the deliverable with it.")
     }.trim()
 
     /** assistant 预填充消息：引导模型从结构化结果开头续写 */
