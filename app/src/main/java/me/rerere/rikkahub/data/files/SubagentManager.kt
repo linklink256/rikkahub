@@ -21,6 +21,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
  * tools: workspace_read_file, workspace_shell, search
  * model: gemini-flash        # 可选，不填则继承主 agent 模型
  * reasoningLevel: high       # 可选，off/auto/low/medium/high/xhigh/max，默认 off（也兼容 reasoning 键）
+ * resultFormat: Summary, Findings, Risks   # 可选，自定义输出契约段落名（逗号分隔），默认 Summary/Findings/Changes/Risks
  * ---
  * <角色 system prompt 正文>
  * ```
@@ -222,6 +223,7 @@ class SubagentManager(
                 reasoningLevel = parseReasoningLevel(
                     frontmatter["reasoningLevel"] ?: frontmatter["reasoning"]
                 ),
+                resultFormat = frontmatter["resultFormat"]?.takeIf { it.isNotBlank() },
                 agentDir = agentDir,
             )
         }.getOrElse {
@@ -238,6 +240,7 @@ data class SubagentMetadata(
     val tools: List<String> = emptyList(),
     val model: String? = null,
     val reasoningLevel: ReasoningLevel? = null,
+    val resultFormat: String? = null,
     val agentDir: File,
 ) {
     val agentFile: File get() = agentDir.resolve("AGENT.md")
