@@ -51,7 +51,9 @@ class SubagentRunner(
      * @param parentModel  主 agent 当前模型（角色未指定模型时继承其 provider）
      * @param toolPool     可用工具池（父会话提供的全部工具，按白名单过滤）
      * @param timeoutMillis 总超时
-     * @param prefill      是否注入 assistant 预填充消息（引导结构化输出；Google provider 自动禁用）
+     * @param prefill      是否注入 assistant 预填充消息。默认关闭：prefill 会强制模型从结果块开头续写，
+     *                     抢占完整产出物（writer 等产出型角色会被压缩成摘要）。纯摘要型角色（如调研）
+     *                     可显式开启以保证格式稳定；Google provider 自动禁用。
      */
     fun run(
         agentId: String = Uuid.random().toString(),
@@ -61,7 +63,7 @@ class SubagentRunner(
         parentModel: Model,
         toolPool: Map<String, Tool>,
         timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
-        prefill: Boolean = true,
+        prefill: Boolean = false,
     ): Flow<SubagentEvent> = flow {
         val model = resolveModel(definition, settings, parentModel)
         val providerSetting = model.findProvider(settings.providers)
@@ -73,7 +75,8 @@ class SubagentRunner(
             definition.tools.isEmpty() || it.name in definition.tools
         }
 
-        // 预填充：Google Gemini API 不允许以 assistant 消息结尾，自动禁用
+        // 预填充：默认关闭（避免抢占产出物）；仅显式开启且非 Google provider 时注入。
+        // Google Gemini API 不允许以 assistant 消息结尾，自动禁用
         val usePrefill = prefill && providerImpl !is GoogleProvider
         val contract = SubagentResultContract.forRole(definition.resultFormat)
         val prefillText = if (usePrefill) contract.prefill else null
