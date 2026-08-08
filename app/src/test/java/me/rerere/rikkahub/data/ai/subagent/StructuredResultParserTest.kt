@@ -238,6 +238,16 @@ class StructuredResultParserTest {
         assertEquals(listOf("Findings", "Changes", "Risks"), contract.sections)
     }
 
+    @Test
+    fun `contract prompt requires deliverable first then result block`() {
+        val contract = SubagentResultContract.forRole(null)
+
+        assertTrue(contract.systemPrompt.contains("FULL deliverable"))
+        assertTrue(contract.systemPrompt.contains("FIRST"))
+        assertTrue(contract.systemPrompt.contains("only the block is parsed"))
+        assertTrue(contract.systemPrompt.contains("never replace the deliverable"))
+    }
+
     // ---- toText round-trip ----
 
     @Test
@@ -278,6 +288,22 @@ class StructuredResultParserTest {
         assertTrue(text.contains("### Risks"))
         assertTrue(text.contains("- r1"))
         assertTrue(!text.contains("### Changes"))
+    }
+
+    @Test
+    fun `toText emits deliverable before result block`() {
+        val result = AgentResult(
+            status = AgentResultStatus.SUCCESS,
+            summary = "Wrote the code.",
+            deliverable = "```kotlin\nfun hello() = \"world\"\n```",
+        )
+
+        val text = result.toText
+
+        // 产出物在结果块之前
+        assertTrue(text.indexOf("```kotlin") < text.indexOf("## Agent Result (SUCCESS)"))
+        assertTrue(text.contains("fun hello() = \"world\""))
+        assertTrue(text.contains("Wrote the code."))
     }
 
     // ---- 预填充（prefill）----
@@ -370,7 +396,7 @@ class StructuredResultParserTest {
     }
 
     @Test
-    fun `working notes before result block are ignored`() {
+    fun `content before result block becomes deliverable`() {
         val raw = """
             I searched the web and found several candidates.
 
@@ -385,6 +411,39 @@ class StructuredResultParserTest {
         val result = StructuredResultParser.parse(raw)
 
         assertEquals("Picked model A.", result.summary)
+        assertEquals("I searched the web and found several candidates.", result.deliverable)
         assertEquals(listOf("wrote report.md"), result.changes)
+    }
+
+    @Test
+    fun `writer style output keeps full deliverable`() {
+        val raw = """
+            ```kotlin
+            fun hello() = "world"
+            ```
+
+            ## Agent Result (SUCCESS)
+
+            Wrote the hello function.
+
+            ### Changes
+            - added hello()
+        """.trimIndent()
+
+        val result = StructuredResultParser.parse(raw)
+
+        assertEquals("```kotlin\nfun hello() = \"world\"\n```", result.deliverable)
+        assertEquals("Wrote the hello function.", result.summary)
+        assertEquals(listOf("added hello()"), result.changes)
+    }
+
+    @Test
+    fun `no result block means no deliverable (fallback)`() {
+        val raw = "Just some plain text without any result block."
+
+        val result = StructuredResultParser.parse(raw)
+
+        assertEquals(raw, result.summary)
+        assertEquals("", result.deliverable)
     }
 }
