@@ -19,11 +19,12 @@ import me.rerere.rikkahub.data.files.SubagentManager
  */
 fun createSubagentManagementTools(
     subagentManager: SubagentManager,
+    enabledSubagents: Set<String> = emptySet(),
 ): List<Tool> = listOf(
     Tool(
         name = "list_subagents",
         description = """
-            List all installed subagent roles (name, description, group, tools whitelist, model, resultFormat).
+            List all installed subagent roles (name, description, group, tools whitelist, model, resultFormat, enabled status).
             Use this when the user asks what subagents are available, or before delegating/editing.
             To view, create, update or delete a role's definition, use the native workspace file tools
             on `/agents/<role-name>/AGENT.md` (mounted in the workspace).
@@ -35,6 +36,8 @@ fun createSubagentManagementTools(
         },
         execute = {
             val list = subagentManager.listSubagents()
+            // 空集 = 全部启用；非空 = 白名单
+            val enabled = enabledSubagents
             val text = if (list.isEmpty()) {
                 "No subagents installed. Create one by writing an AGENT.md under /agents/<role-name>/ " +
                     "with the workspace tools (e.g. `workspace_write_file`), or ask the user to add one " +
@@ -45,7 +48,12 @@ fun createSubagentManagementTools(
                     list.groupBy { it.group }.forEach { (group, members) ->
                         appendLine("• Group \"${group}\":")
                         members.forEach { s ->
-                            appendLine("  - ${s.name}: ${s.description}")
+                            val status = if (enabled.isEmpty() || s.name in enabled) {
+                                "enabled"
+                            } else {
+                                "disabled (not in assistant's enabledSubagents)"
+                            }
+                            appendLine("  - ${s.name}: ${s.description} [$status]")
                             appendLine("    tools: ${s.tools.joinToString(", ").ifEmpty { "(all)" }}")
                             appendLine("    model: ${s.model ?: "(inherit main agent)"}")
                             appendLine("    resultFormat: ${s.resultFormat ?: "(default: Summary, Findings, Changes, Risks)"}")
@@ -55,6 +63,10 @@ fun createSubagentManagementTools(
                     appendLine(
                         "Definitions live at /agents/<role-name>/AGENT.md. Manage them with the native " +
                             "workspace file tools (read / write / edit / shell rm) — no dedicated tools needed."
+                    )
+                    appendLine(
+                        "Enabled status comes from the assistant's enabledSubagents list (empty = all enabled). " +
+                            "A role listed as disabled cannot be delegated to via the subagent tool."
                     )
                 }
             }
