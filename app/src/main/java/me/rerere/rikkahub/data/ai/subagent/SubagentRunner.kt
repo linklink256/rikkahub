@@ -16,6 +16,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.providers.GoogleProvider
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.handleMessageChunk
@@ -50,6 +51,7 @@ class SubagentRunner(
      * @param parentModel  主 agent 当前模型（角色未指定模型时继承其 provider）
      * @param toolPool     可用工具池（父会话提供的全部工具，按白名单过滤）
      * @param timeoutMillis 总超时
+     * @param prefill      是否注入 assistant 预填充消息（引导结构化输出；Google provider 自动禁用）
      */
     fun run(
         agentId: String = Uuid.random().toString(),
@@ -59,6 +61,7 @@ class SubagentRunner(
         parentModel: Model,
         toolPool: Map<String, Tool>,
         timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
+        prefill: Boolean = true,
     ): Flow<SubagentEvent> = flow {
         val model = resolveModel(definition, settings, parentModel)
         val providerSetting = model.findProvider(settings.providers)
@@ -70,11 +73,18 @@ class SubagentRunner(
             definition.tools.isEmpty() || it.name in definition.tools
         }
 
+        // 预填充：Google Gemini API 不允许以 assistant 消息结尾，自动禁用
+        val usePrefill = prefill && providerImpl !is GoogleProvider
+        val prefillText = if (usePrefill) SubagentResultContract.PREFILL else null
+
         val systemPrompt = buildSystemPrompt(definition, envelope, model, allowedTools)
-        var messages = listOf(
-            UIMessage.system(systemPrompt),
-            UIMessage.user(buildUserMessage(envelope)),
-        )
+        var messages = buildList {
+            add(UIMessage.system(systemPrompt))
+            add(UIMessage.user(buildUserMessage(envelope)))
+            if (prefillText != null) {
+                add(UIMessage.assistant(prefillText))
+            }
+        }
 
         emit(SubagentEvent.Started(agentId, definition.name, envelope.task))
 
@@ -135,7 +145,7 @@ class SubagentRunner(
                 }
             }
 
-            emit(SubagentEvent.Finished(agentId, parseResult(messages)))
+            emit(SubagentEvent.Finished(agentId, parseResult(messages, prefillText)))
         } catch (e: TimeoutCancellationException) {
             Log.w(TAG, "run: timeout ($agentId)")
             emit(
@@ -239,6 +249,10 @@ class SubagentRunner(
                 append(tool.systemPrompt(model, emptyList()))
             }
         }
+
+        // 输出契约：要求最终以结构化格式结束
+        appendLine()
+        append(SubagentResultContract.SYSTEM_PROMPT)
     }.trim()
 
     private fun buildUserMessage(envelope: TaskEnvelope): String = buildString {
@@ -283,19 +297,21 @@ class SubagentRunner(
     )
 
     /**
-     * P0 简单解析：取最后一条 assistant 消息的文本作为结果摘要。
-     * 后续可升级为按角色输出契约做结构化解析。
+     * 解析子代理最终输出为结构化 [AgentResult]。
+     *
+     * 优先使用 [StructuredResultParser] 按输出契约解析（Markdown 段落 / JSON），
+     * 解析失败时回退为全文摘要；同时回填 token usage 与原始输出。
      */
-    private fun parseResult(messages: List<UIMessage>): AgentResult {
+    private fun parseResult(messages: List<UIMessage>, prefill: String?): AgentResult {
         val lastAssistant = messages.lastOrNull { it.role == MessageRole.ASSISTANT }
         val text = lastAssistant?.parts
             ?.filterIsInstance<UIMessagePart.Text>()
             ?.joinToString("\n") { it.text }
             ?.trim()
             .orEmpty()
-        return AgentResult(
-            status = AgentResultStatus.SUCCESS,
-            summary = text.ifBlank { "(empty output)" },
+        val parsed = StructuredResultParser.parse(text, prefill)
+        return parsed.copy(
+            usage = lastAssistant?.usage ?: parsed.usage,
         )
     }
 }
