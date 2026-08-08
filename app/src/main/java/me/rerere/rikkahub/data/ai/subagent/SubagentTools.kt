@@ -23,7 +23,7 @@ fun createSubagentManagementTools(
     Tool(
         name = "list_subagents",
         description = """
-            List all installed subagent roles (name, description, group, tools whitelist, model).
+            List all installed subagent roles (name, description, group, tools whitelist, model, resultFormat).
             Use this when the user asks what subagents are available, or before delegating/editing.
             To view, create, update or delete a role's definition, use the native workspace file tools
             on `/agents/<role-name>/AGENT.md` (mounted in the workspace).
@@ -48,6 +48,7 @@ fun createSubagentManagementTools(
                             appendLine("  - ${s.name}: ${s.description}")
                             appendLine("    tools: ${s.tools.joinToString(", ").ifEmpty { "(all)" }}")
                             appendLine("    model: ${s.model ?: "(inherit main agent)"}")
+                            appendLine("    resultFormat: ${s.resultFormat ?: "(default: Summary, Findings, Changes, Risks)"}")
                         }
                     }
                     appendLine()
