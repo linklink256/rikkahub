@@ -51,6 +51,7 @@ object StructuredResultParser {
         raw: String,
         prefill: String? = null,
         sections: List<String> = DEFAULT_SECTIONS,
+        rawMode: Boolean = false,
     ): AgentResult {
         val text = stripPrefill(raw, prefill)
         val trimmed = text.trim()
@@ -58,6 +59,18 @@ object StructuredResultParser {
             return AgentResult(
                 status = AgentResultStatus.SUCCESS,
                 summary = "(empty output)",
+                raw = rawMode,
+                rawOutput = raw,
+            )
+        }
+
+        // raw 模式：不做结构化解析，内容原样返回（deliverable 承载全文）
+        if (rawMode) {
+            return AgentResult(
+                status = AgentResultStatus.SUCCESS,
+                summary = trimmed,
+                deliverable = trimmed,
+                raw = true,
                 rawOutput = raw,
             )
         }
@@ -250,13 +263,17 @@ object StructuredResultParser {
  * 子代理输出契约：注入 system prompt 与 prefill 引导，
  * 使子代理最终输出可被 [StructuredResultParser] 稳定解析。
  *
- * 角色可在 AGENT.md frontmatter 中用 `resultFormat` 自定义段落名（逗号分隔），
- * 例如 `resultFormat: Summary, Bugs, Security, Suggestions`；
- * 未声明时使用默认契约（Summary / Findings / Changes / Risks）。
+ * 角色可在 AGENT.md frontmatter 中用 `resultFormat` 自定义输出模式：
+ * - `resultFormat: raw`                      纯文本输出，不注入任何契约、不做结构化包装（适合 NSFW/小说/散文等产出）
+ * - `resultFormat: Summary, Bugs, Security`  自定义段落名（逗号分隔）
+ * - 未声明时使用默认契约（Summary / Findings / Changes / Risks）
  */
 object SubagentResultContract {
 
     const val TITLE: String = "## Agent Result (SUCCESS)"
+
+    /** `resultFormat: raw` 特殊值：纯文本输出，跳过所有结构化处理 */
+    private const val RAW_MARKER = "raw"
 
     /** 默认契约：Summary + Findings/Changes/Risks */
     fun default(): RoleContract = forRole(null)
@@ -264,10 +281,19 @@ object SubagentResultContract {
     /**
      * 根据角色的 `resultFormat` 生成契约。
      *
-     * 解析规则：按逗号分隔段落名，过滤空项；未声明或解析为空时回退默认契约。
+     * - `raw`（大小写不敏感）→ 纯文本模式：无契约注入、无 prefill、无结构化解析
+     * - 逗号分隔段落名 → 按段落名生成契约；未声明或解析为空时回退默认契约
      * 段落名保留用户写法，匹配时大小写不敏感；Summary 段自动特殊处理（内容并入 summary）。
      */
     fun forRole(resultFormat: String?): RoleContract {
+        if (resultFormat?.trim()?.equals(RAW_MARKER, ignoreCase = true) == true) {
+            return RoleContract(
+                sections = emptyList(),
+                systemPrompt = "",
+                prefill = "",
+                raw = true,
+            )
+        }
         val sections = resultFormat
             ?.split(',')
             ?.map { it.trim() }
@@ -313,9 +339,10 @@ object SubagentResultContract {
     const val PREFILL: String = "## Agent Result (SUCCESS)\n\n"
 }
 
-/** 角色级输出契约：自定义段落名 + 注入 system prompt 的格式说明 + prefill */
+/** 角色级输出契约：自定义段落名 + 注入 system prompt 的格式说明 + prefill + raw 模式标记 */
 data class RoleContract(
     val sections: List<String>,
     val systemPrompt: String,
     val prefill: String,
+    val raw: Boolean = false,
 )
