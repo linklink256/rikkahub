@@ -5,6 +5,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -86,6 +88,8 @@ class SubagentRunner(
      *                     任务结束后自动把结果摘要追加写入（Deep Agents 持久记忆风格）。
      * @param contextLimit 上下文压缩阈值（字符）。历史超过该值时自动调用模型压缩中间消息为摘要，
      *                     避免长任务上下文爆炸（Deep Agents 风格）；0 = 关闭。
+     * @param memoryLock   会话间记忆锁：并行任务共享同一 Mutex 时，记忆文件的"读-改-写"会被串行化，
+     *                     避免并发写覆盖导致记忆丢失（ISS-002）；null = 不加锁。
      */
     fun run(
         agentId: String = Uuid.random().toString(),
@@ -99,6 +103,7 @@ class SubagentRunner(
         retryOnEmpty: Boolean = true,
         memoryFile: String? = null,
         contextLimit: Int = DEFAULT_CONTEXT_LIMIT,
+        memoryLock: Mutex? = null,
     ): Flow<SubagentEvent> = flow {
         val model = resolveModel(definition, settings, parentModel)
         val providerSetting = model.findProvider(settings.providers)
@@ -255,9 +260,17 @@ class SubagentRunner(
 
             // 正常完成：非空结果或已达重试上限 → 结束；空结果 → 追加提示重跑
             if (attempt >= maxAttempts || !result.isEmptyResult) {
-                // 会话间记忆：任务结束后自动把结果摘要追加写入记忆文件
+                // 会话间记忆：任务结束后自动把结果摘要追加写入记忆文件。
+                // 锁内"重读最新 + 追加"，避免并行任务互相覆盖（ISS-002）
                 if (memoryFile != null && !result.isEmptyResult) {
-                    writeMemoryFile(toolPool, memoryFile, memoryText, result)
+                    if (memoryLock != null) {
+                        memoryLock.withLock {
+                            val latest = readMemoryFile(toolPool, memoryFile) ?: memoryText
+                            writeMemoryFile(toolPool, memoryFile, latest, result)
+                        }
+                    } else {
+                        writeMemoryFile(toolPool, memoryFile, memoryText, result)
+                    }
                 }
                 emit(SubagentEvent.Finished(agentId, result))
                 return@flow
@@ -331,7 +344,8 @@ class SubagentRunner(
         // 会话间记忆（历史任务留下的持久化记忆，只读参考；任务结束后 Runner 会自动更新）
         if (!memory.isNullOrBlank()) {
             appendLine("## Session Memory")
-            appendLine("以下为历史会话留下的记忆，作为背景参考：")
+            appendLine("以下为历史会话留下的记忆，仅作背景参考（可能过期或不完整）：")
+            appendLine("- 涉及时效性数据（文件内容、数值、状态）时，必须读取实际文件确认，禁止仅凭记忆作答。")
             appendLine(memory.trim())
             appendLine()
         }
@@ -461,24 +475,59 @@ class SubagentRunner(
         return obj["text"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
     }
 
-    /** 任务结束后：把结果摘要追加写入记忆文件（静默失败） */
+    /** 任务结束后：把结果摘要追加写入记忆文件（静默失败）。
+     *  优先使用 workspace_shell 原子追加（O_APPEND，并行同角色任务不互相覆盖，ISS-002）；
+     *  追加不可用或文件超限时回退 workspace_write_file 覆盖写。 */
     private suspend fun writeMemoryFile(
         toolPool: Map<String, Tool>,
         path: String,
         existing: String?,
         result: AgentResult,
     ) {
-        val writeTool = toolPool["workspace_write_file"] ?: return
         val summary = result.toText.take(MEMORY_APPEND_LIMIT)
         if (summary.isBlank()) return
-        val updated = buildString {
-            if (!existing.isNullOrBlank()) {
-                appendLine(existing)
-                appendLine()
-            }
-            appendLine("--- ${java.time.Instant.now()} ---")
+        val header = "--- ${java.time.Instant.now()} ---"
+        val entry = buildString {
+            appendLine(header)
             appendLine(summary)
-        }.take(MEMORY_FILE_LIMIT)
+        }
+        val appendMode = existing.isNullOrBlank() || existing.length + entry.length <= MEMORY_FILE_LIMIT
+
+        // 方案一：shell 原子追加（heredoc + O_APPEND，并行安全）
+        if (appendMode) {
+            val shellTool = toolPool["workspace_shell"]
+            if (shellTool != null) {
+                val delimiter = "RH_EOF_" + Uuid.random().toString().replace("-", "")
+                val safeEntry = entry.replace(delimiter, "${delimiter}_x")
+                val command = buildString {
+                    append("mkdir -p \"\$(dirname \"$path\")\" && cat >> \"$path\" << '$delimiter'\n")
+                    append(safeEntry)
+                    append('\n')
+                    append(delimiter)
+                }
+                val args = runCatching {
+                    JsonInstant.parseToJsonElement(
+                        JsonInstant.encodeToString(
+                            buildJsonObject {
+                                put("command", command)
+                                put("timeout", JsonPrimitive(30))
+                            }
+                        )
+                    )
+                }.getOrNull()
+                if (args != null && runCatching { shellTool.execute(args) }.isSuccess) {
+                    return
+                }
+            }
+        }
+
+        // 方案二：覆盖写（追加不可用 / 文件接近上限时压缩保留尾部）
+        val writeTool = toolPool["workspace_write_file"] ?: return
+        val updated = if (appendMode) {
+            (existing.orEmpty() + "\n\n" + entry).take(MEMORY_FILE_LIMIT)
+        } else {
+            (existing.orEmpty().takeLast(MEMORY_FILE_LIMIT / 2) + "\n\n" + entry).take(MEMORY_FILE_LIMIT)
+        }
         val args = runCatching {
             JsonInstant.parseToJsonElement(
                 JsonInstant.encodeToString(
