@@ -52,6 +52,7 @@ object StructuredResultParser {
         prefill: String? = null,
         sections: List<String> = DEFAULT_SECTIONS,
         rawMode: Boolean = false,
+        jsonMode: Boolean = false,
     ): AgentResult {
         val text = stripPrefill(raw, prefill)
         val trimmed = text.trim()
@@ -75,6 +76,19 @@ object StructuredResultParser {
             )
         }
 
+        // json 模式：整体 JSON 优先，失败则提取 {…} 子串容错，再失败回退全文
+        if (jsonMode) {
+            parseJson(trimmed, raw, sections)?.let { return it }
+            extractJsonObject(trimmed)?.let { extracted ->
+                parseJson(extracted, raw, sections)?.let { return it }
+            }
+            return AgentResult(
+                status = AgentResultStatus.SUCCESS,
+                summary = trimmed,
+                rawOutput = raw,
+            )
+        }
+
         // 1) JSON 对象格式
         parseJson(trimmed, raw, sections)?.let { return it }
 
@@ -85,6 +99,14 @@ object StructuredResultParser {
             sections = sections,
             rawOutput = raw,
         )
+    }
+
+    /** 从文本中提取第一个 `{` 到最后一个 `}` 的子串（json 模式容错：模型可能附带注释/围栏） */
+    private fun extractJsonObject(text: String): String? {
+        val start = text.indexOf('{')
+        val end = text.lastIndexOf('}')
+        if (start < 0 || end <= start) return null
+        return text.substring(start, end + 1)
     }
 
     // ---- JSON 格式 ----
@@ -265,6 +287,7 @@ object StructuredResultParser {
  *
  * 角色可在 AGENT.md frontmatter 中用 `resultFormat` 自定义输出模式：
  * - `resultFormat: raw`                      纯文本输出，不注入任何契约、不做结构化包装（适合 NSFW/小说/散文等产出）
+ * - `resultFormat: json`                     强制 JSON 对象输出（OpenAI 系 provider 同时注入 response_format）
  * - `resultFormat: Summary, Bugs, Security`  自定义段落名（逗号分隔）
  * - 未声明时使用默认契约（Summary / Findings / Changes / Risks）
  */
@@ -274,6 +297,9 @@ object SubagentResultContract {
 
     /** `resultFormat: raw` 特殊值：纯文本输出，跳过所有结构化处理 */
     private const val RAW_MARKER = "raw"
+
+    /** `resultFormat: json` 特殊值：强制 JSON 对象输出 */
+    private const val JSON_MARKER = "json"
 
     /**
      * raw 模式的防御性输出指令：不要求结构化，反而主动压制模型自发的结构化倾向
@@ -288,6 +314,18 @@ object SubagentResultContract {
         appendLine("Just write the content directly from the first line to the last.")
     }.trim()
 
+    /** json 模式的输出指令：要求单个合法 JSON 对象 */
+    private val JSON_OUTPUT_INSTRUCTION: String = buildString {
+        appendLine("## Output Format")
+        appendLine("Respond with a SINGLE valid JSON object only — no markdown fences, no commentary, no trailing text:")
+        appendLine("""{"status":"SUCCESS","summary":"...","findings":["..."],"changes":["..."],"risks":["..."]}""")
+        appendLine("Rules:")
+        appendLine("- status: \"SUCCESS\" or \"FAILED\".")
+        appendLine("- summary: short summary of what was done.")
+        appendLine("- findings / changes / risks: string arrays; omit keys with no items.")
+        appendLine("- If the task produces files or content, write them to files FIRST (persist deliverables), then return the JSON summary.")
+    }.trim()
+
     /** 默认契约：Summary + Findings/Changes/Risks */
     fun default(): RoleContract = forRole(null)
 
@@ -299,12 +337,21 @@ object SubagentResultContract {
      * 段落名保留用户写法，匹配时大小写不敏感；Summary 段自动特殊处理（内容并入 summary）。
      */
     fun forRole(resultFormat: String?): RoleContract {
-        if (resultFormat?.trim()?.equals(RAW_MARKER, ignoreCase = true) == true) {
+        val trimmed = resultFormat?.trim()
+        if (trimmed.equals(RAW_MARKER, ignoreCase = true)) {
             return RoleContract(
                 sections = emptyList(),
                 systemPrompt = RAW_OUTPUT_INSTRUCTION,
                 prefill = "",
                 raw = true,
+            )
+        }
+        if (trimmed.equals(JSON_MARKER, ignoreCase = true)) {
+            return RoleContract(
+                sections = emptyList(),
+                systemPrompt = JSON_OUTPUT_INSTRUCTION,
+                prefill = "",
+                json = true,
             )
         }
         val sections = resultFormat
@@ -352,7 +399,7 @@ object SubagentResultContract {
     const val PREFILL: String = "## Agent Result (SUCCESS)\n\n"
 
     /**
-     * 通用效率指南：注入所有子代理（含 raw 模式）。
+     * 通用效率指南：注入所有子代理（含 raw/json 模式）。
      * 针对流水线复盘问题：写手自我迭代（A1）、验收要求繁琐（A3）、首轮空手返回（C1）。
      * 措辞为指南而非硬性约束，避免影响需要多轮工具协作的复杂任务。
      */
@@ -362,13 +409,15 @@ object SubagentResultContract {
         appendLine("- Deliver the RESULT, not the process: skip self-verification steps (wc, re-reads, diff, JSON checks) unless the task explicitly asks for them — verification is the caller's job.")
         appendLine("- If the task produces files or content, WRITE IT FIRST, then summarize briefly. Never return empty-handed.")
         appendLine("- Minimize tool round-trips: compose the full content in your head first, then write it once.")
+        appendLine("- PERSIST deliverables to files under /workspace whenever file tools are available — files survive, reply text does not. The reply should only summarize what was written.")
     }.trim()
 }
 
-/** 角色级输出契约：自定义段落名 + 注入 system prompt 的格式说明 + prefill + raw 模式标记 */
+/** 角色级输出契约：自定义段落名 + 注入 system prompt 的格式说明 + prefill + raw/json 模式标记 */
 data class RoleContract(
     val sections: List<String>,
     val systemPrompt: String,
     val prefill: String,
     val raw: Boolean = false,
+    val json: Boolean = false,
 )
