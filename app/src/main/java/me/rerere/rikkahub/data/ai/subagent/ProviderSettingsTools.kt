@@ -11,7 +11,8 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
  * 以便为子代理（subagent）指定合适的 `model` 字段。
  *
  * 输出格式与 SubagentRunner.resolveModel 的解析逻辑兼容：
- * - `model: openai:gpt-4o`           精确指定供应商与模型（供应商名:模型ID）
+ * - `model: openai:gpt-4o` / `OpenAI/gpt-4o`   精确指定供应商与模型（供应商名:模型ID 或 供应商名/模型ID）
+ * - `model: gpt-4o`                            只按模型 ID/显示名匹配
  * - 留空则继承主 agent 模型
  *
  * 注意：只输出供应商名称与模型元数据，**不会**暴露 apiKey / baseUrl 等敏感配置。
@@ -25,7 +26,8 @@ fun createProviderSettingsTools(
             List the AI providers and chat models currently configured in the app settings.
             Use this to see which model identifiers are available before creating or updating a
             subagent, or before delegating a task, so you can pick the right model for a role.
-            Output format for the `model` field is 'ProviderName:modelId', e.g. 'openai:gpt-4o'.
+            Output format for the `model` field is 'ProviderName:modelId' or 'ProviderName/modelId',
+            e.g. 'openai:gpt-4o' / 'OpenAI/gpt-4o'; a bare model id like 'gpt-4o' also works.
         """.trimIndent(),
         parameters = {
             InputSchema.Obj(
@@ -60,7 +62,8 @@ fun createProviderSettingsTools(
                     appendLine()
                     appendLine(
                         "To use a model for a subagent, set its AGENT.md `model` field to " +
-                            "'ProviderName:modelId' (e.g. 'openai:gpt-4o'), or omit it to inherit the main agent model."
+                            "'ProviderName:modelId' or 'ProviderName/modelId' (e.g. 'openai:gpt-4o' / 'OpenAI/gpt-4o'), " +
+                            "or just the model id (e.g. 'gpt-4o'); omit it to inherit the main agent model."
                     )
                 }
             }

@@ -19,7 +19,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
  * description: 只读调研，压缩调查结果
  * group: research            # 可选，分组名，用于选择界面按组全选/部分选择；不填归入默认组
  * tools: workspace_read_file, workspace_shell, search   # 可选；tools: none = 禁用全部；未声明 = 继承全部工具池
- * model: openai:gpt-4o       # 可选，仅支持 '供应商:模型ID' 格式；不填则继承主 agent 模型
+ * model: openai:gpt-4o       # 可选，支持 '供应商:模型ID' / '供应商/模型ID' / 裸模型ID；不填则继承主 agent 模型
  * reasoningLevel: high       # 可选，off/auto/low/medium/high/xhigh/max，默认 off（也兼容 reasoning 键）
  * resultFormat: Summary, Findings, Risks   # 可选，自定义输出契约段落名（逗号分隔），默认 Summary/Findings/Changes/Risks
  * ---

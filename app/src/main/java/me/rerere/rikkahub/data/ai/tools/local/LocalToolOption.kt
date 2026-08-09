@@ -36,4 +36,8 @@ sealed class LocalToolOption {
     @Serializable
     @SerialName("shell")
     data object Shell : LocalToolOption()
+
+    @Serializable
+    @SerialName("phone_files")
+    data object PhoneFiles : LocalToolOption()
 }

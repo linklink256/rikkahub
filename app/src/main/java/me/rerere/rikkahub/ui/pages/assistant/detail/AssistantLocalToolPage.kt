@@ -228,6 +228,20 @@ private fun AssistantLocalToolContent(
             )
             item(
                 headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_phone_files_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_phone_files_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.PhoneFiles),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.PhoneFiles, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_shell_title))
                 },
                 supportingContent = {
