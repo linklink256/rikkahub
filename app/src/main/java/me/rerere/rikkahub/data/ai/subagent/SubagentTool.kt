@@ -221,7 +221,6 @@ fun createSubagentTool(
                     log.append(logText)
                     listOf(result)
                 }
-
                 SubagentMode.PARALLEL -> {
                     val tasks = subtasks.ifEmpty { listOf(task) }
                     if (tasks.size > MAX_SUBTASKS) {
@@ -304,12 +303,15 @@ private suspend fun runAndCollect(
     // 每个调用独立日志（StringBuilder 非线程安全；并行模式共享实例会崩溃）
     val log = StringBuilder()
     var result = AgentResult(status = AgentResultStatus.FAILED, summary = "(no result)")
+    // 会话间记忆：每个角色一个记忆文件，跨任务持久（工作区工具可用时自动读写）
+    val memoryFile = "/workspace/.cache/subagent-memory/${definition.name}.md"
     runner.run(
         definition = definition,
         envelope = envelope,
         settings = settings,
         parentModel = model,
         toolPool = toolPool.associateBy { it.name },
+        memoryFile = memoryFile,
     ).collect { event ->
         when (event) {
             is SubagentEvent.Started -> log.appendLine("▶ [${event.role}] ${event.task}")
