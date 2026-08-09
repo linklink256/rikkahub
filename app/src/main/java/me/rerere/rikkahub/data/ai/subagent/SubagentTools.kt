@@ -36,7 +36,7 @@ fun createSubagentManagementTools(
         },
         execute = {
             val list = subagentManager.listSubagents()
-            // 空集 = 全部启用；非空 = 白名单
+            // 空集 = 全部启用；含哨兵 = 全部禁用；非空 = 白名单
             val enabled = enabledSubagents
             val text = if (list.isEmpty()) {
                 "No subagents installed. Create one by writing an AGENT.md under /agents/<role-name>/ " +
@@ -54,7 +54,13 @@ fun createSubagentManagementTools(
                                 "disabled (not in assistant's enabledSubagents)"
                             }
                             appendLine("  - ${s.name}: ${s.description} [$status]")
-                            appendLine("    tools: ${s.tools.joinToString(", ").ifEmpty { "(all)" }}")
+                            appendLine(
+                                "    tools: " + when {
+                                    s.toolsDisabled -> "(none - all disabled)"
+                                    s.tools.isEmpty() -> "(all inherited)"
+                                    else -> s.tools.joinToString(", ")
+                                }
+                            )
                             appendLine("    model: ${s.model ?: "(inherit main agent)"}")
                             appendLine("    resultFormat: ${s.resultFormat ?: "(default: Summary, Findings, Changes, Risks)"}")
                         }

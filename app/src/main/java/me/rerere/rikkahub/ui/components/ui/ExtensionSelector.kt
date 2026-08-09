@@ -247,30 +247,33 @@ fun ExtensionSelector(
                             enabledSubagents = assistant.enabledSubagents,
                             groupDescriptions = groupDescriptions,
                             onToggle = { name, checked ->
-                                // 空集语义 = 全部启用：首次取消勾选前先物化为全部已装角色名，再执行加减
+                                // 空集语义 = 全部启用：首次取消勾选前先物化为全部已装角色名，再执行加减。
+                                // 取消最后一个勾选时集合会变空 → 空集又被解释为"全部启用"，
+                                // 因此全部取消后写入哨兵值（SUBAGENTS_DISABLED_MARKER）表示"全部禁用"。
                                 val base = if (assistant.enabledSubagents.isEmpty()) {
                                     subagents.mapTo(LinkedHashSet()) { it.name }
                                 } else {
-                                    assistant.enabledSubagents
+                                    assistant.enabledSubagents - SubagentManager.SUBAGENTS_DISABLED_MARKER
                                 }
                                 val newSubagents = if (checked) {
                                     base + name
                                 } else {
-                                    base - name
+                                    (base - name).ifEmpty { setOf(SubagentManager.SUBAGENTS_DISABLED_MARKER) }
                                 }
                                 onUpdate(assistant.copy(enabledSubagents = newSubagents))
                             },
                             onToggleGroup = { _, names, checked ->
-                                // 组全选同样先物化空集为全部角色名，再执行加减
+                                // 组全选同样先物化空集为全部角色名，再执行加减；
+                                // 取消后为空同样写入哨兵值表示全部禁用
                                 val base = if (assistant.enabledSubagents.isEmpty()) {
                                     subagents.mapTo(LinkedHashSet()) { it.name }
                                 } else {
-                                    assistant.enabledSubagents
+                                    assistant.enabledSubagents - SubagentManager.SUBAGENTS_DISABLED_MARKER
                                 }
                                 val newSubagents = if (checked) {
                                     base + names
                                 } else {
-                                    base - names
+                                    (base - names).ifEmpty { setOf(SubagentManager.SUBAGENTS_DISABLED_MARKER) }
                                 }
                                 onUpdate(assistant.copy(enabledSubagents = newSubagents))
                             },

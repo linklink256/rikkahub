@@ -110,14 +110,20 @@ class SubagentRunner(
             ?: error("Provider not found for model ${model.modelId}")
         val providerImpl = providerManager.getProviderByType(providerSetting)
 
-        // 工具白名单：定义未声明 tools 时继承全部工具池
-        val allowedTools = toolPool.values.filter {
-            definition.tools.isEmpty() || it.name in definition.tools
+        // 工具白名单三态：
+        // - toolsDisabled（`tools: none`）→ 禁用全部工具，子代理无任何工具可用
+        // - tools 为空（未声明）→ 继承全部工具池
+        // - tools 非空 → 只保留白名单内的工具
+        val allowedTools = when {
+            definition.toolsDisabled -> emptyList()
+            definition.tools.isEmpty() -> toolPool.values
+            else -> toolPool.values.filter { it.name in definition.tools }
         }
 
         // 工具预检（Claude Code 风格）：AGENT.md 声明的工具必须能在工具池中解析，
         // 解析不到立即失败并给出诊断，避免模型白跑一轮后才在工具调用时报错。
-        if (definition.tools.isNotEmpty()) {
+        // `tools: none`（禁用全部）不参与预检。
+        if (definition.tools.isNotEmpty() && !definition.toolsDisabled) {
             val unresolved = definition.tools.filter { it !in toolPool }
             if (unresolved.isNotEmpty()) {
                 emit(
@@ -286,9 +292,8 @@ class SubagentRunner(
     /**
      * 解析子代理配置的模型。
      *
-     * `model` 字段支持两种格式：
-     * - `model: gpt-4o`              只按模型 ID/显示名匹配（同名时命中第一个配置的供应商）
-     * - `model: OpenAI/gpt-4o`       或 `openai:gpt-4o`，精确指定供应商
+     * `model` 字段只支持 `供应商:模型ID` 格式（如 `openai:gpt-4o`）：
+     * - `model: openai:gpt-4o`   精确指定供应商与模型 ID/显示名
      * - 留空则继承主 agent 模型
      */
     private fun resolveModel(
@@ -299,15 +304,20 @@ class SubagentRunner(
         val modelName = definition.model?.trim().orEmpty()
         if (modelName.isEmpty()) return parentModel
 
-        // 拆分可选的 "供应商/" 或 "供应商:" 前缀
-        val slashIndex = modelName.indexOf('/')
+        // 只支持 "供应商:模型ID" 格式；其他格式（裸模型名、斜杠分隔）一律报错，
+        // 避免用户误以为配置已生效
         val colonIndex = modelName.indexOf(':')
-        val sepIndex = listOf(slashIndex, colonIndex).filter { it >= 0 }.minOrNull()
-        val providerFilter = if (sepIndex != null) modelName.substring(0, sepIndex).trim() else null
-        val modelPart = if (sepIndex != null) modelName.substring(sepIndex + 1).trim() else modelName
+        val providerFilter = if (colonIndex > 0) modelName.substring(0, colonIndex).trim() else null
+        val modelPart = if (colonIndex > 0) modelName.substring(colonIndex + 1).trim() else null
+        if (providerFilter == null || modelPart.isNullOrEmpty()) {
+            error(
+                "Subagent '${definition.name}' 的 model 字段格式错误：只支持 '供应商:模型ID' 格式" +
+                    "（如 openai:gpt-4o），当前值 '$modelName'。清空 model 字段则继承主 agent 模型。"
+            )
+        }
 
         settings.providers.forEach { provider ->
-            if (providerFilter != null && !provider.name.equals(providerFilter, ignoreCase = true)) {
+            if (!provider.name.equals(providerFilter, ignoreCase = true)) {
                 return@forEach
             }
             provider.models.forEach { model ->
@@ -319,7 +329,7 @@ class SubagentRunner(
         // 配置的模型不存在时明确报错，而不是静默回退到主模型，避免用户误以为配置已生效
         error(
             "Subagent '${definition.name}' 指定的模型 '$modelName' 未配置。请检查 AGENT.md 的 model 字段" +
-                "（支持 '供应商/模型ID' 格式，如 OpenAI/gpt-4o），或在设置中添加该模型；" +
+                "（格式：'供应商:模型ID'，如 openai:gpt-4o），或在设置中添加该模型；" +
                 "清空 model 字段则继承主 agent 模型。"
         )
     }
@@ -396,7 +406,13 @@ class SubagentRunner(
         val toolDef = allowedTools.find { it.name == tool.toolName }
             ?: return errorOutput(buildString {
                 appendLine("Tool '${tool.toolName}' is not available in the subagent tool pool.")
-                appendLine("Declared in AGENT.md tools: ${definition.tools.joinToString(", ").ifEmpty { "(all inherited from parent session)" }}")
+                appendLine(
+                    "Declared in AGENT.md tools: " + when {
+                        definition.toolsDisabled -> "(none - all tools disabled)"
+                        definition.tools.isEmpty() -> "(all inherited from parent session)"
+                        else -> definition.tools.joinToString(", ")
+                    }
+                )
                 appendLine("Available tools: ${allowedTools.joinToString { it.name }.ifEmpty { "(none)" }}")
                 appendLine("Hint: workspace_* tools exist only when the assistant is bound to a workspace whose shell is READY. Check the parent session's Workspace settings; or declare only tools that exist in the parent session.")
             })

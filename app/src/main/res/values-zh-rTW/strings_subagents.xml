@@ -6,6 +6,8 @@
   <string name="subagents_page_empty_title">暫無子代理</string>
   <string name="subagents_page_empty_hint">建立子代理角色或從 GitHub 匯入</string>
   <string name="subagents_page_tool_count">%1$d 個工具</string>
+  <string name="subagents_page_tools_none">無工具（已停用）</string>
+  <string name="subagents_page_tools_all">全部工具</string>
   <string name="subagents_page_model">模型：%1$s</string>
   <string name="subagents_page_more_actions">更多操作</string>
   <string name="subagents_page_edit">編輯</string>

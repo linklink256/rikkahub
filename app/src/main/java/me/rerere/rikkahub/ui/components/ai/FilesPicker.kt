@@ -71,6 +71,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.files.SubagentManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
@@ -180,7 +181,8 @@ internal fun FilesPicker(
             assistant.quickMessageIds.size +
                 modeAndLorebookCount +
                 assistant.enabledSkills.size +
-                assistant.enabledSubagents.size
+                // 哨兵值 = 全部禁用，不计入已启用数量
+                assistant.enabledSubagents.count { it != me.rerere.rikkahub.data.files.SubagentManager.SUBAGENTS_DISABLED_MARKER }
         ListItem(
             leadingContent = {
                 Icon(

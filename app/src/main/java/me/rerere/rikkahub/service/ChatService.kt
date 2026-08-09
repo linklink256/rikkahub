@@ -551,7 +551,8 @@ class ChatService(
                     // 系统设置查询工具：主 agent 可查看供应商/模型，为子代理指定 model
                     addAll(createProviderSettingsTools(settingsStore))
 
-                    // 委派工具：安装子代理角色后可用；只暴露该助手已启用的角色（空集=全部启用）。
+                    // 委派工具：安装子代理角色后可用；只暴露该助手已启用的角色
+                    // （空集=全部启用；含哨兵 SUBAGENTS_DISABLED_MARKER=全部禁用，此时不创建委派工具）。
                     // 置于工具池最前，避免被 MCP 等大量工具淹没，提高委派积极性。
                     val enabledSubagents = runCatching {
                         subagentManager.listSubagents().applyEnabledSubagents(assistant.enabledSubagents)

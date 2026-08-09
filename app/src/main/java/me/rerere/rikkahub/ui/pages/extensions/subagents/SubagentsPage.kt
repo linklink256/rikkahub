@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.extensions.subagents
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -48,10 +50,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Download01
@@ -73,6 +78,7 @@ import org.koin.androidx.compose.koinViewModel
 fun SubagentsPage() {
     val vm = koinViewModel<SubagentsVM>()
     val subagents by vm.subagents.collectAsStateWithLifecycle()
+    val groupDescriptions by vm.groupDescriptions.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val toaster = LocalToaster.current
     val context = LocalContext.current
@@ -81,6 +87,15 @@ fun SubagentsPage() {
     var showImportDialog by rememberSaveable { mutableStateOf(false) }
     var editing by remember { mutableStateOf<SubagentMetadata?>(null) }
     var deleteTarget by remember { mutableStateOf<SubagentMetadata?>(null) }
+    // 分组折叠状态：按组名记录，默认全部展开
+    var collapsedGroups by rememberSaveable { mutableStateOf(setOf<String>()) }
+    // 按组分组；default 组始终排在最后
+    val groups = remember(subagents) {
+        subagents
+            .groupBy { it.group }
+            .toList()
+            .sortedBy { (group, _) -> if (group == SubagentManager.DEFAULT_GROUP) 1 else 0 }
+    }
     val fileImportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -150,12 +165,32 @@ fun SubagentsPage() {
                 }
             }
 
-            items(subagents, key = { it.agentDir.absolutePath }) { subagent ->
-                SubagentCard(
-                    subagent = subagent,
-                    onClick = { editing = subagent },
-                    onDelete = { deleteTarget = subagent },
-                )
+            groups.forEach { (group, members) ->
+                val collapsed = group in collapsedGroups
+                item(key = "group-header-$group") {
+                    SubagentGroupHeader(
+                        groupName = group,
+                        groupDescription = groupDescriptions[group],
+                        memberCount = members.size,
+                        collapsed = collapsed,
+                        onToggleCollapse = {
+                            collapsedGroups = if (collapsed) {
+                                collapsedGroups - group
+                            } else {
+                                collapsedGroups + group
+                            }
+                        },
+                    )
+                }
+                if (!collapsed) {
+                    items(members, key = { it.agentDir.absolutePath }) { subagent ->
+                        SubagentCard(
+                            subagent = subagent,
+                            onClick = { editing = subagent },
+                            onDelete = { deleteTarget = subagent },
+                        )
+                    }
+                }
             }
         }
     }
@@ -248,6 +283,63 @@ fun SubagentsPage() {
 }
 
 @Composable
+private fun SubagentGroupHeader(
+    groupName: String,
+    memberCount: Int,
+    collapsed: Boolean,
+    onToggleCollapse: () -> Unit,
+    groupDescription: String? = null,
+) {
+    val displayName = if (groupName == SubagentManager.DEFAULT_GROUP) {
+        stringResource(R.string.subagents_page_default_group)
+    } else {
+        groupName
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .clickable { onToggleCollapse() }
+            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = if (collapsed) HugeIcons.ArrowRight01 else HugeIcons.ArrowDown01,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Column(
+            modifier = Modifier
+                .padding(start = 8.dp)
+                .weight(1f),
+        ) {
+            Text(
+                text = displayName,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            if (!groupDescription.isNullOrBlank()) {
+                Text(
+                    text = groupDescription,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Text(
+            text = stringResource(R.string.subagents_page_group_count, memberCount, memberCount),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
 private fun SubagentCard(
     subagent: SubagentMetadata,
     onClick: () -> Unit,
@@ -308,7 +400,11 @@ private fun SubagentCard(
                         )
                     }
                     Text(
-                        text = stringResource(R.string.subagents_page_tool_count, subagent.tools.size),
+                        text = when {
+                            subagent.toolsDisabled -> stringResource(R.string.subagents_page_tools_none)
+                            subagent.tools.isEmpty() -> stringResource(R.string.subagents_page_tools_all)
+                            else -> stringResource(R.string.subagents_page_tool_count, subagent.tools.size)
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -438,7 +534,7 @@ private fun EditSubagentDialog(
                 label = { Text(stringResource(R.string.subagents_page_content_label)) },
                 placeholder = {
                     Text(
-                        "---\nname: scout\ndescription: \"...\"\ngroup: research\nmodel: \nreasoningLevel: high\n---\n\n角色指令...",
+                        "---\nname: scout\ndescription: \"...\"\ngroup: research\ntools: workspace_read_file, workspace_shell\nmodel: openai:gpt-4o\nreasoningLevel: high\n---\n\n角色指令...",
                         fontFamily = FontFamily.Monospace,
                     )
                 },

@@ -6,6 +6,8 @@
   <string name="subagents_page_empty_title">No subagents yet</string>
   <string name="subagents_page_empty_hint">Create a subagent role or import one from GitHub</string>
   <string name="subagents_page_tool_count">%1$d tools</string>
+  <string name="subagents_page_tools_none">No tools (disabled)</string>
+  <string name="subagents_page_tools_all">All tools</string>
   <string name="subagents_page_model">Model: %1$s</string>
   <string name="subagents_page_more_actions">More actions</string>
   <string name="subagents_page_edit">Edit</string>

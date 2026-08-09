@@ -18,8 +18,8 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
  * name: scout
  * description: 只读调研，压缩调查结果
  * group: research            # 可选，分组名，用于选择界面按组全选/部分选择；不填归入默认组
- * tools: workspace_read_file, workspace_shell, search
- * model: gemini-flash        # 可选，不填则继承主 agent 模型
+ * tools: workspace_read_file, workspace_shell, search   # 可选；tools: none = 禁用全部；未声明 = 继承全部工具池
+ * model: openai:gpt-4o       # 可选，仅支持 '供应商:模型ID' 格式；不填则继承主 agent 模型
  * reasoningLevel: high       # 可选，off/auto/low/medium/high/xhigh/max，默认 off（也兼容 reasoning 键）
  * resultFormat: Summary, Findings, Risks   # 可选，自定义输出契约段落名（逗号分隔），默认 Summary/Findings/Changes/Risks
  * ---
@@ -35,6 +35,17 @@ class SubagentManager(
     companion object {
         private const val TAG = "SubagentManager"
         const val DEFAULT_GROUP = "default"
+
+        /**
+         * 全部禁用哨兵：`enabledSubagents` 含此值时表示"全部禁用"。
+         *
+         * 空集语义仍为"全部启用"（向后兼容）；用户主动取消全部勾选时，
+         * UI 写入此哨兵而非空集，避免"取消全部后又变回全部启用"。
+         */
+        const val SUBAGENTS_DISABLED_MARKER = "__subagents_disabled__"
+
+        /** `tools: none` 特殊值：显式禁用全部工具（区别于未声明 = 继承全部工具池） */
+        const val TOOLS_NONE_MARKER = "none"
     }
 
     fun getAgentsDir(): File {
@@ -161,7 +172,10 @@ class SubagentManager(
         settingsStore.update { settings ->
             var changed = false
             val newAssistants = settings.assistants.map { assistant ->
-                val pruned = assistant.enabledSubagents.filterTo(LinkedHashSet()) { it in existing }
+                // 哨兵值（全部禁用标记）不属于任何真实角色，必须保留，不能被当孤儿清理
+                val pruned = assistant.enabledSubagents.filterTo(LinkedHashSet()) {
+                    it in existing || it == SUBAGENTS_DISABLED_MARKER
+                }
                 if (pruned.size != assistant.enabledSubagents.size) {
                     changed = true
                     assistant.copy(enabledSubagents = pruned)
@@ -210,15 +224,26 @@ class SubagentManager(
             val frontmatter = SkillFrontmatterParser.parse(content)
             val name = frontmatter["name"]?.takeIf { it.isNotBlank() } ?: return null
             val description = frontmatter["description"]?.takeIf { it.isNotBlank() } ?: return null
+            // tools 三态：
+            // - 未声明 → 空列表 + toolsDisabled=false（继承全部工具池）
+            // - `tools: none` → 空列表 + toolsDisabled=true（显式禁用全部工具）
+            // - `tools: a, b` → 白名单 + toolsDisabled=false
+            val toolsRaw = frontmatter["tools"]?.trim().orEmpty()
+            val toolsDisabled = toolsRaw.equals(TOOLS_NONE_MARKER, ignoreCase = true)
             SubagentMetadata(
                 name = name,
                 description = description,
                 group = frontmatter["group"]?.takeIf { it.isNotBlank() } ?: DEFAULT_GROUP,
-                tools = frontmatter["tools"]
-                    ?.split(",", " ")
-                    ?.map { it.trim() }
-                    ?.filter { it.isNotBlank() }
-                    ?: emptyList(),
+                tools = if (toolsDisabled) {
+                    emptyList()
+                } else {
+                    frontmatter["tools"]
+                        ?.split(",", " ")
+                        ?.map { it.trim() }
+                        ?.filter { it.isNotBlank() }
+                        ?: emptyList()
+                },
+                toolsDisabled = toolsDisabled,
                 model = frontmatter["model"]?.takeIf { it.isNotBlank() },
                 reasoningLevel = parseReasoningLevel(
                     frontmatter["reasoningLevel"] ?: frontmatter["reasoning"]
@@ -238,6 +263,7 @@ data class SubagentMetadata(
     val description: String,
     val group: String = SubagentManager.DEFAULT_GROUP,
     val tools: List<String> = emptyList(),
+    val toolsDisabled: Boolean = false, // tools: none → 显式禁用全部工具（区别于未声明继承全部）
     val model: String? = null,
     val reasoningLevel: ReasoningLevel? = null,
     val resultFormat: String? = null,
@@ -255,7 +281,13 @@ data class SubagentGroup(
 /**
  * 按 `enabled` 白名单过滤子代理角色。
  *
- * 空集语义 = 全部启用（不限制），向后兼容现状（全部可用）并符合积极性目标。
+ * - 空集 = 全部启用（不限制，向后兼容现状）
+ * - 含 [SubagentManager.SUBAGENTS_DISABLED_MARKER] 哨兵 = 全部禁用（用户主动取消全部勾选）
+ * - 其余 = 仅启用集合内名字的角色
  */
 fun List<SubagentMetadata>.applyEnabledSubagents(enabled: Set<String>): List<SubagentMetadata> =
-    if (enabled.isEmpty()) this else filter { it.name in enabled }
+    when {
+        enabled.isEmpty() -> this
+        SubagentManager.SUBAGENTS_DISABLED_MARKER in enabled -> emptyList()
+        else -> filter { it.name in enabled }
+    }

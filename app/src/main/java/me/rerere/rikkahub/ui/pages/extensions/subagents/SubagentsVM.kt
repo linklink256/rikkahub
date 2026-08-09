@@ -22,13 +22,23 @@ class SubagentsVM(
     private val _subagents = MutableStateFlow<List<SubagentMetadata>>(emptyList())
     val subagents = _subagents.asStateFlow()
 
+    private val _groupDescriptions = MutableStateFlow<Map<String, String>>(emptyMap())
+    val groupDescriptions = _groupDescriptions.asStateFlow()
+
     init {
         loadSubagents()
+        loadGroupDescriptions()
     }
 
     private fun loadSubagents() {
         viewModelScope.launch(Dispatchers.IO) {
             _subagents.value = subagentManager.listSubagents()
+        }
+    }
+
+    private fun loadGroupDescriptions() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _groupDescriptions.value = subagentManager.listGroupDescriptions()
         }
     }
 

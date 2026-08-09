@@ -119,7 +119,9 @@ fun createSubagentTool(
                             appendLine("    <subagent>")
                             appendLine("      <name>${s.name}</name>")
                             appendLine("      <description>${s.description}</description>")
-                            if (s.tools.isNotEmpty()) {
+                            if (s.toolsDisabled) {
+                                appendLine("      <tools>none (all tools disabled)</tools>")
+                            } else if (s.tools.isNotEmpty()) {
                                 appendLine("      <tools>${s.tools.joinToString(", ")}</tools>")
                             }
                             s.model?.let { appendLine("      <model>$it</model>") }

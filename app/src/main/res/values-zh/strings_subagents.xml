@@ -6,6 +6,8 @@
   <string name="subagents_page_empty_title">暂无子代理</string>
   <string name="subagents_page_empty_hint">创建子代理角色或从 GitHub 导入</string>
   <string name="subagents_page_tool_count">%1$d 个工具</string>
+  <string name="subagents_page_tools_none">无工具（已禁用）</string>
+  <string name="subagents_page_tools_all">全部工具</string>
   <string name="subagents_page_model">模型：%1$s</string>
   <string name="subagents_page_more_actions">更多操作</string>
   <string name="subagents_page_edit">编辑</string>

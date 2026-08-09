@@ -191,17 +191,19 @@ fun SubagentsContent(
     }
     // 折叠状态：默认全部展开；跨重组/配置变更保留，不持久化
     var collapsedGroups by rememberSaveable { mutableStateOf(setOf<String>()) }
+    // 全部禁用：用户取消全部勾选后 enabledSubagents 写入哨兵值，此时所有开关均为关
+    val allDisabled = SubagentManager.SUBAGENTS_DISABLED_MARKER in enabledSubagents
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         groups.forEach { (group, members, memberNames) ->
-            // "有效启用"口径：空集 = 全部启用，故空集时视为全组已启用
-            val selectedCount = if (enabledSubagents.isEmpty()) {
-                members.size
-            } else {
-                members.count { it.name in enabledSubagents }
+            // "有效启用"口径：空集 = 全部启用，故空集时视为全组已启用；哨兵 = 全部禁用
+            val selectedCount = when {
+                allDisabled -> 0
+                enabledSubagents.isEmpty() -> members.size
+                else -> members.count { it.name in enabledSubagents }
             }
             val collapsed = group in collapsedGroups
             item(key = "group-header-$group") {
@@ -247,7 +249,7 @@ fun SubagentsContent(
                                 } else null,
                                 trailingContent = {
                                     Switch(
-                                        checked = enabledSubagents.isEmpty() || enabledSubagents.contains(subagent.name),
+                                        checked = !allDisabled && (enabledSubagents.isEmpty() || enabledSubagents.contains(subagent.name)),
                                         onCheckedChange = { checked -> onToggle(subagent.name, checked) }
                                     )
                                 },
