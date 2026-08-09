@@ -1,6 +1,5 @@
 package me.rerere.ai.provider
 
-import me.rerere.ai.core.ModelAbility
 import me.rerere.ai.core.ReasoningLevel
 
 /**
