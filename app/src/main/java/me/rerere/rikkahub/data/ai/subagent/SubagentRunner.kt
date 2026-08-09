@@ -7,14 +7,21 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
+import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderManager
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.GoogleProvider
 import me.rerere.ai.ui.UIMessage
@@ -51,6 +58,15 @@ class SubagentRunner(
             "你的上一次运行未产出任何内容（没有输出文本，也没有落盘任何文件）。" +
                 "请立即直接完成当前任务：先写好完整产出物并落盘，再给出简短总结。" +
                 "注意：一次成稿，不要自我迭代，不要空手返回。"
+
+        /** 上下文压缩阈值（字符）：超过后自动把历史压缩成摘要（Deep Agents 风格） */
+        private const val DEFAULT_CONTEXT_LIMIT = 90_000
+
+        /** 记忆文件单次追加的最大字符数 */
+        private const val MEMORY_APPEND_LIMIT = 2_000
+
+        /** 记忆文件总大小上限（字符），防止无限膨胀 */
+        private const val MEMORY_FILE_LIMIT = 8_000
     }
 
     /**
@@ -65,6 +81,11 @@ class SubagentRunner(
      *                     可显式开启以保证格式稳定；Google provider 自动禁用。
      * @param retryOnEmpty 空结果自动重试：首次运行未产出任何内容（无文本、无落盘）时，
      *                     自动追加提示重跑一次，避免流水线白等一轮（flash 模型偶发"只思考不落盘"）。
+     * @param memoryFile   会话间记忆文件路径（如 /workspace/.cache/subagent-memory/<role>.md）。
+     *                     非空且工作区工具可用时：任务开始前自动读取记忆注入 system prompt，
+     *                     任务结束后自动把结果摘要追加写入（Deep Agents 持久记忆风格）。
+     * @param contextLimit 上下文压缩阈值（字符）。历史超过该值时自动调用模型压缩中间消息为摘要，
+     *                     避免长任务上下文爆炸（Deep Agents 风格）；0 = 关闭。
      */
     fun run(
         agentId: String = Uuid.random().toString(),
@@ -76,6 +97,8 @@ class SubagentRunner(
         timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
         prefill: Boolean = false,
         retryOnEmpty: Boolean = true,
+        memoryFile: String? = null,
+        contextLimit: Int = DEFAULT_CONTEXT_LIMIT,
     ): Flow<SubagentEvent> = flow {
         val model = resolveModel(definition, settings, parentModel)
         val providerSetting = model.findProvider(settings.providers)
@@ -87,13 +110,35 @@ class SubagentRunner(
             definition.tools.isEmpty() || it.name in definition.tools
         }
 
+        // 工具预检（Claude Code 风格）：AGENT.md 声明的工具必须能在工具池中解析，
+        // 解析不到立即失败并给出诊断，避免模型白跑一轮后才在工具调用时报错。
+        if (definition.tools.isNotEmpty()) {
+            val unresolved = definition.tools.filter { it !in toolPool }
+            if (unresolved.isNotEmpty()) {
+                emit(
+                    SubagentEvent.Failed(
+                        agentId,
+                        buildString {
+                            appendLine("AGENT.md tools 无法解析: ${unresolved.joinToString(", ")}")
+                            appendLine("可用工具: ${toolPool.keys.joinToString(", ").ifEmpty { "(none)" }}")
+                            appendLine("Hint: workspace_* 工具仅在父会话绑定 workspace 且 shell READY 时可用；请检查工作区设置，或修正 AGENT.md 的 tools 列表。")
+                        }
+                    )
+                )
+                return@flow
+            }
+        }
+
+        // 会话间记忆：任务开始前自动读取记忆文件（工作区工具可用时）
+        val memoryText = if (memoryFile != null) readMemoryFile(toolPool, memoryFile) else null
+
         // 预填充：默认关闭（避免抢占产出物）；raw 模式强制关闭；
         // 仅显式开启且非 Google provider 时注入。Google Gemini API 不允许以 assistant 消息结尾，自动禁用
         val contract = SubagentResultContract.forRole(definition.resultFormat)
         val usePrefill = prefill && !contract.raw && providerImpl !is GoogleProvider
         val prefillText = if (usePrefill) contract.prefill else null
 
-        val systemPrompt = buildSystemPrompt(definition, envelope, model, allowedTools, contract)
+        val systemPrompt = buildSystemPrompt(definition, envelope, model, allowedTools, contract, memoryText)
         var messages = buildList {
             add(UIMessage.system(systemPrompt))
             add(UIMessage.user(buildUserMessage(envelope)))
@@ -117,10 +162,27 @@ class SubagentRunner(
                         emit(SubagentEvent.StepStarted(agentId, step))
                         Log.i(TAG, "run: step $step ($agentId)")
 
+                        // 上下文管理：历史超阈值时压缩中间消息为摘要（Deep Agents 风格）
+                        if (contextLimit > 0 && messages.textChars() > contextLimit) {
+                            messages = compressHistory(providerImpl, providerSetting, model, messages)
+                            Log.w(TAG, "run: context compressed at step $step ($agentId)")
+                        }
+
                         val params = TextGenerationParams(
                             model = model,
                             tools = allowedTools,
                             reasoningLevel = definition.reasoningLevel ?: ReasoningLevel.OFF,
+                            // json 模式：OpenAI 系注入 response_format 强制 JSON 输出（Claude/Google 靠 prompt 引导）
+                            customBody = if (contract.json && providerSetting is ProviderSetting.OpenAI) {
+                                listOf(
+                                    CustomBody(
+                                        key = "response_format",
+                                        value = JsonInstant.parseToJsonElement("""{"type":"json_object"}"""),
+                                    )
+                                )
+                            } else {
+                                emptyList()
+                            },
                         )
 
                         // 流式收集模型输出，边收边上报进度
@@ -193,6 +255,10 @@ class SubagentRunner(
 
             // 正常完成：非空结果或已达重试上限 → 结束；空结果 → 追加提示重跑
             if (attempt >= maxAttempts || !result.isEmptyResult) {
+                // 会话间记忆：任务结束后自动把结果摘要追加写入记忆文件
+                if (memoryFile != null && !result.isEmptyResult) {
+                    writeMemoryFile(toolPool, memoryFile, memoryText, result)
+                }
                 emit(SubagentEvent.Finished(agentId, result))
                 return@flow
             }
@@ -251,6 +317,7 @@ class SubagentRunner(
         model: Model,
         tools: List<Tool>,
         contract: RoleContract,
+        memory: String? = null,
     ): String = buildString {
         // 角色定义正文
         val body = runCatching {
@@ -258,6 +325,14 @@ class SubagentRunner(
         }.getOrDefault("")
         if (body.isNotBlank()) {
             appendLine(body.trim())
+            appendLine()
+        }
+
+        // 会话间记忆（历史任务留下的持久化记忆，只读参考；任务结束后 Runner 会自动更新）
+        if (!memory.isNullOrBlank()) {
+            appendLine("## Session Memory")
+            appendLine("以下为历史会话留下的记忆，作为背景参考：")
+            appendLine(memory.trim())
             appendLine()
         }
 
@@ -358,9 +433,111 @@ class SubagentRunner(
             ?.joinToString("\n") { it.text }
             ?.trim()
             .orEmpty()
-        val parsed = StructuredResultParser.parse(text, prefill, contract.sections, rawMode = contract.raw)
+        val parsed = StructuredResultParser.parse(
+            raw = text,
+            prefill = prefill,
+            sections = contract.sections,
+            rawMode = contract.raw,
+            jsonMode = contract.json,
+        )
         return parsed.copy(
             usage = lastAssistant?.usage ?: parsed.usage,
         )
+    }
+
+    // ---- 会话间记忆（Deep Agents 持久记忆风格）----
+
+    /** 任务开始前：通过工作区工具读取记忆文件内容（静默失败，无工具/文件不存在时返回 null） */
+    private suspend fun readMemoryFile(toolPool: Map<String, Tool>, path: String): String? {
+        val readTool = toolPool["workspace_read_file"] ?: return null
+        val args = runCatching {
+            JsonInstant.parseToJsonElement(
+                JsonInstant.encodeToString(buildJsonObject { put("path", path) })
+            )
+        }.getOrNull() ?: return null
+        val parts = runCatching { readTool.execute(args) }.getOrNull() ?: return null
+        val text = parts.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text ?: return null
+        val obj = runCatching { JsonInstant.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
+        return obj["text"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+    }
+
+    /** 任务结束后：把结果摘要追加写入记忆文件（静默失败） */
+    private suspend fun writeMemoryFile(
+        toolPool: Map<String, Tool>,
+        path: String,
+        existing: String?,
+        result: AgentResult,
+    ) {
+        val writeTool = toolPool["workspace_write_file"] ?: return
+        val summary = result.toText.take(MEMORY_APPEND_LIMIT)
+        if (summary.isBlank()) return
+        val updated = buildString {
+            if (!existing.isNullOrBlank()) {
+                appendLine(existing)
+                appendLine()
+            }
+            appendLine("--- ${java.time.Instant.now()} ---")
+            appendLine(summary)
+        }.take(MEMORY_FILE_LIMIT)
+        val args = runCatching {
+            JsonInstant.parseToJsonElement(
+                JsonInstant.encodeToString(
+                    buildJsonObject {
+                        put("path", path)
+                        put("text", updated)
+                        put("overwrite", JsonPrimitive(true))
+                    }
+                )
+            )
+        }.getOrNull() ?: return
+        runCatching { writeTool.execute(args) }
+    }
+
+    // ---- 上下文管理（Deep Agents 风格：超长自动压缩）----
+
+    /** 消息文本总字符数（仅统计 Text part） */
+    private fun List<UIMessage>.textChars(): Int =
+        sumOf { msg -> msg.parts.filterIsInstance<UIMessagePart.Text>().sumOf { it.text.length } }
+
+    /**
+     * 把中间历史压缩成一条摘要：保留 system + 末尾 keepTail 条消息，
+     * 中间部分调用模型生成要点摘要（保留文件路径/决策/数字等硬信息）。
+     * 摘要失败时降级为占位提示，保证上下文可继续。
+     */
+    private suspend fun compressHistory(
+        providerImpl: Provider<ProviderSetting>,
+        providerSetting: ProviderSetting,
+        model: Model,
+        messages: List<UIMessage>,
+    ): List<UIMessage> {
+        val keepTail = 2
+        if (messages.size <= keepTail + 1) return messages
+        val systemIndex = messages.indexOfFirst { it.role == MessageRole.SYSTEM }
+        val head = if (systemIndex >= 0) messages.subList(0, systemIndex + 1) else emptyList()
+        val tail = messages.takeLast(keepTail)
+        val middle = messages.subList(head.size, messages.size - keepTail)
+        val middleText = middle.joinToString("\n\n") { msg ->
+            msg.parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
+        }
+        val summary = runCatching {
+            val chunk = providerImpl.generateText(
+                providerSetting,
+                listOf(
+                    UIMessage.user(
+                        "Summarize this agent working conversation into concise bullet points. " +
+                            "Keep ALL concrete facts: file paths, decisions, numbers, tool results, remaining todo. " +
+                            "Output only the summary:\n\n$middleText"
+                    )
+                ),
+                TextGenerationParams(model = model, maxTokens = 512),
+            )
+            chunk.choices.firstOrNull()?.message?.parts
+                ?.filterIsInstance<UIMessagePart.Text>()
+                ?.joinToString("\n") { it.text }
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: "(history compressed by runner: ${middle.size} earlier messages)"
+
+        Log.w(TAG, "compressHistory: ${messages.size} messages -> ${head.size + 1} + tail ${tail.size}")
+        return head + UIMessage.user("## Compressed History\n$summary") + tail
     }
 }
