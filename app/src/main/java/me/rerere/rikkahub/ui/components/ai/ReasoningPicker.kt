@@ -58,6 +58,7 @@ fun ReasoningButton(
     reasoningLevel: ReasoningLevel,
     onUpdateReasoningLevel: (ReasoningLevel) -> Unit,
     model: Model? = null,
+    providerHost: String? = null,
 ) {
     var showPicker by remember { mutableStateOf(false) }
 
@@ -67,6 +68,7 @@ fun ReasoningButton(
             onDismissRequest = { showPicker = false },
             onUpdateReasoningLevel = onUpdateReasoningLevel,
             model = model,
+            providerHost = providerHost,
         )
     }
 
@@ -97,6 +99,7 @@ fun ReasoningPicker(
     onDismissRequest: () -> Unit = {},
     onUpdateReasoningLevel: (ReasoningLevel) -> Unit,
     model: Model? = null,
+    providerHost: String? = null,
 ) {
     val currentIndex = levels.indexOf(reasoningLevel).coerceAtLeast(0)
     var sliderValue by remember { mutableFloatStateOf(currentIndex.toFloat()) }
@@ -134,9 +137,9 @@ fun ReasoningPicker(
                 )
             }
 
-            // 实际生效 effort 预览：基于当前模型能力计算
+            // 实际生效 effort 预览：基于当前模型能力 + 供应商映射计算
             model?.let { m ->
-                val effective = m.effectiveReasoningEffort(reasoningLevel)
+                val effective = m.effectiveReasoningEffort(reasoningLevel, providerHost)
                 if (effective != null) {
                     Text(
                         text = buildString {

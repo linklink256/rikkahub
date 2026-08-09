@@ -625,6 +625,7 @@ private fun ModelSettingsForm(
                                     onModelChange(model.copy(abilities = it))
                                 },
                                 model = model,
+                                providerHost = (parentProvider as? ProviderSetting.OpenAI)?.baseUrl,
                             )
                         }
                     }
@@ -1126,6 +1127,7 @@ fun ModalAbilitySelector(
     onUpdateAbilities: (List<ModelAbility>) -> Unit,
     model: Model? = null,
     reasoningLevel: ReasoningLevel? = null,
+    providerHost: String? = null,
 ) {
     Text(
         stringResource(R.string.setting_provider_page_abilities),
@@ -1161,7 +1163,7 @@ fun ModalAbilitySelector(
     // REASONING 能力开启时：展示"实际生效的 effort"预览（基于当前模型的推理档位）
     if (abilities.contains(ModelAbility.REASONING) && model != null) {
         val level = reasoningLevel ?: ReasoningLevel.HIGH
-        val effective = model.effectiveReasoningEffort(level)
+        val effective = model.effectiveReasoningEffort(level, providerHost)
         if (effective != null) {
             Text(
                 text = buildString {

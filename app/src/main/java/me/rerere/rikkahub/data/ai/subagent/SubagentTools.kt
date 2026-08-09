@@ -117,19 +117,28 @@ private fun resolveEffortLine(
     val modelPart = if (sepIndex != null) modelName.substring(sepIndex + 1).trim() else modelName
 
     val settings = settingsStore.settingsFlow.value
+    var host: String? = null
     val model = settings.providers.firstNotNullOfOrNull { provider ->
         if (providerFilter != null && !provider.name.equals(providerFilter, ignoreCase = true)) {
             return@firstNotNullOfOrNull null
         }
-        provider.models.firstOrNull { it.modelId == modelPart || it.displayName == modelPart }
+        val found = provider.models.firstOrNull { it.modelId == modelPart || it.displayName == modelPart }
+        if (found != null) {
+            // 记录供应商 baseUrl 供 effort 映射（DeepSeek 等特殊规则）
+            host = when (provider) {
+                is me.rerere.ai.provider.ProviderSetting.OpenAI -> provider.baseUrl
+                else -> null
+            }
+        }
+        found
     }
     if (model == null) {
         return "$level (model '$modelName' not configured)"
     }
-    val effective = model.effectiveReasoningEffort(level)
+    val effective = model.effectiveReasoningEffort(level, host)
         ?: return "$level (no effect: model lacks REASONING ability)"
     return if (effective.isCapped) {
-        "${effective.value} (capped: ${effective.note})"
+        "${effective.value} (${effective.note})"
     } else {
         effective.value
     }
