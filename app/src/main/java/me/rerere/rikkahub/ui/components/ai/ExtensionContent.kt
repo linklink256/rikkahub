@@ -27,7 +27,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -189,8 +188,8 @@ fun SubagentsContent(
                 Triple(group, members, members.mapTo(LinkedHashSet()) { it.name })
             }
     }
-    // 折叠状态：默认全部展开；跨重组/配置变更保留，不持久化
-    var collapsedGroups by rememberSaveable { mutableStateOf(setOf<String>()) }
+    // 折叠状态：默认全部收起（组列表变化时重置为全部收起），点击组头展开
+    var collapsedGroups by remember(subagents) { mutableStateOf(groups.map { it.first }.toSet()) }
     // 全部禁用：用户取消全部勾选后 enabledSubagents 写入哨兵值，此时所有开关均为关
     val allDisabled = SubagentManager.SUBAGENTS_DISABLED_MARKER in enabledSubagents
 
