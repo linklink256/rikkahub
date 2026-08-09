@@ -42,6 +42,15 @@ class SubagentRunner(
     companion object {
         private const val TAG = "SubagentRunner"
         private const val DEFAULT_TIMEOUT_MILLIS = 10 * 60 * 1000L
+
+        /** 空结果自动重试的最大尝试次数（首次 + 重试一次） */
+        private const val MAX_EMPTY_RETRY_ATTEMPTS = 2
+
+        /** 空结果重试提示：明示上次未产出内容，要求先落盘再返回 */
+        private const val EMPTY_RESULT_RETRY_HINT =
+            "你的上一次运行未产出任何内容（没有输出文本，也没有落盘任何文件）。" +
+                "请立即直接完成当前任务：先写好完整产出物并落盘，再给出简短总结。" +
+                "注意：一次成稿，不要自我迭代，不要空手返回。"
     }
 
     /**
@@ -54,6 +63,8 @@ class SubagentRunner(
      * @param prefill      是否注入 assistant 预填充消息。默认关闭：prefill 会强制模型从结果块开头续写，
      *                     抢占完整产出物（writer 等产出型角色会被压缩成摘要）。纯摘要型角色（如调研）
      *                     可显式开启以保证格式稳定；Google provider 自动禁用。
+     * @param retryOnEmpty 空结果自动重试：首次运行未产出任何内容（无文本、无落盘）时，
+     *                     自动追加提示重跑一次，避免流水线白等一轮（flash 模型偶发"只思考不落盘"）。
      */
     fun run(
         agentId: String = Uuid.random().toString(),
@@ -64,6 +75,7 @@ class SubagentRunner(
         toolPool: Map<String, Tool>,
         timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
         prefill: Boolean = false,
+        retryOnEmpty: Boolean = true,
     ): Flow<SubagentEvent> = flow {
         val model = resolveModel(definition, settings, parentModel)
         val providerSetting = model.findProvider(settings.providers)
@@ -92,86 +104,101 @@ class SubagentRunner(
 
         emit(SubagentEvent.Started(agentId, definition.name, envelope.task))
 
-        try {
-            withTimeout(timeoutMillis) {
-                // 无步数限制：直到模型不再调用工具（任务完成）或超时
-                var step = 0
-                while (true) {
-                    step++
-                    emit(SubagentEvent.StepStarted(agentId, step))
-                    Log.i(TAG, "run: step $step ($agentId)")
+        // 空结果自动重试：最多 2 次尝试（首次 + 重试一次）
+        val maxAttempts = if (retryOnEmpty) MAX_EMPTY_RETRY_ATTEMPTS else 1
+        var attempt = 1
+        while (true) {
+            val result = try {
+                withTimeout(timeoutMillis) {
+                    // 无步数限制：直到模型不再调用工具（任务完成）或超时
+                    var step = 0
+                    while (true) {
+                        step++
+                        emit(SubagentEvent.StepStarted(agentId, step))
+                        Log.i(TAG, "run: step $step ($agentId)")
 
-                    val params = TextGenerationParams(
-                        model = model,
-                        tools = allowedTools,
-                        reasoningLevel = definition.reasoningLevel ?: ReasoningLevel.OFF,
-                    )
+                        val params = TextGenerationParams(
+                            model = model,
+                            tools = allowedTools,
+                            reasoningLevel = definition.reasoningLevel ?: ReasoningLevel.OFF,
+                        )
 
-                    // 流式收集模型输出，边收边上报进度
-                    providerImpl.streamText(providerSetting, messages, params).collect { chunk ->
-                        messages = messages.handleMessageChunk(chunk, model)
-                        chunk.choices.firstOrNull()?.delta?.parts.orEmpty()
-                            .filterIsInstance<UIMessagePart.Text>()
-                            .forEach { part ->
-                                if (part.text.isNotBlank()) {
-                                    emit(SubagentEvent.Progress(agentId, part.text))
+                        // 流式收集模型输出，边收边上报进度
+                        providerImpl.streamText(providerSetting, messages, params).collect { chunk ->
+                            messages = messages.handleMessageChunk(chunk, model)
+                            chunk.choices.firstOrNull()?.delta?.parts.orEmpty()
+                                .filterIsInstance<UIMessagePart.Text>()
+                                .forEach { part ->
+                                    if (part.text.isNotBlank()) {
+                                        emit(SubagentEvent.Progress(agentId, part.text))
+                                    }
                                 }
-                            }
-                    }
-
-                    val lastMessage = messages.lastOrNull() ?: break
-                    val toolsToProcess = lastMessage.parts
-                        .filterIsInstance<UIMessagePart.Tool>()
-                        .filter { !it.isExecuted }
-                    if (toolsToProcess.isEmpty()) break
-
-                    // 执行工具（子 agent 不弹审批，直接执行或按需跳过）
-                    val executedTools = toolsToProcess.map { tool ->
-                        emit(SubagentEvent.ToolCall(agentId, tool.toolName, tool.input))
-                        val output = executeTool(tool, allowedTools, definition)
-                        val summary = output
-                            .filterIsInstance<UIMessagePart.Text>()
-                            .joinToString(" ") { it.text }
-                            .take(200)
-                        emit(SubagentEvent.ToolResult(agentId, tool.toolName, summary))
-                        tool.copy(output = output)
-                    }
-
-                    // 将工具输出回填到最后一条消息，继续下一轮
-                    val updatedParts = lastMessage.parts.map { part ->
-                        if (part is UIMessagePart.Tool) {
-                            executedTools.find { it.toolCallId == part.toolCallId } ?: part
-                        } else {
-                            part
                         }
+
+                        val lastMessage = messages.lastOrNull() ?: break
+                        val toolsToProcess = lastMessage.parts
+                            .filterIsInstance<UIMessagePart.Tool>()
+                            .filter { !it.isExecuted }
+                        if (toolsToProcess.isEmpty()) break
+
+                        // 执行工具（子 agent 不弹审批，直接执行或按需跳过）
+                        val executedTools = toolsToProcess.map { tool ->
+                            emit(SubagentEvent.ToolCall(agentId, tool.toolName, tool.input))
+                            val output = executeTool(tool, allowedTools, definition)
+                            val summary = output
+                                .filterIsInstance<UIMessagePart.Text>()
+                                .joinToString(" ") { it.text }
+                                .take(200)
+                            emit(SubagentEvent.ToolResult(agentId, tool.toolName, summary))
+                            tool.copy(output = output)
+                        }
+
+                        // 将工具输出回填到最后一条消息，继续下一轮
+                        val updatedParts = lastMessage.parts.map { part ->
+                            if (part is UIMessagePart.Tool) {
+                                executedTools.find { it.toolCallId == part.toolCallId } ?: part
+                            } else {
+                                part
+                            }
+                        }
+                        messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts)
                     }
-                    messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts)
                 }
+                parseResult(messages, prefillText, contract)
+            } catch (e: TimeoutCancellationException) {
+                Log.w(TAG, "run: timeout ($agentId)")
+                emit(
+                    SubagentEvent.Finished(
+                        agentId = agentId,
+                        result = AgentResult(
+                            status = AgentResultStatus.TIMEOUT,
+                            summary = "Subagent timed out after ${timeoutMillis / 1000}s",
+                        ),
+                    )
+                )
+                return@flow
+            } catch (e: CancellationException) {
+                emit(
+                    SubagentEvent.Finished(
+                        agentId = agentId,
+                        result = AgentResult(status = AgentResultStatus.CANCELLED, summary = "Cancelled"),
+                    )
+                )
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "run: failed ($agentId)", e)
+                emit(SubagentEvent.Failed(agentId, e.message ?: e.javaClass.simpleName))
+                return@flow
             }
 
-            emit(SubagentEvent.Finished(agentId, parseResult(messages, prefillText, contract)))
-        } catch (e: TimeoutCancellationException) {
-            Log.w(TAG, "run: timeout ($agentId)")
-            emit(
-                SubagentEvent.Finished(
-                    agentId = agentId,
-                    result = AgentResult(
-                        status = AgentResultStatus.TIMEOUT,
-                        summary = "Subagent timed out after ${timeoutMillis / 1000}s",
-                    ),
-                )
-            )
-        } catch (e: CancellationException) {
-            emit(
-                SubagentEvent.Finished(
-                    agentId = agentId,
-                    result = AgentResult(status = AgentResultStatus.CANCELLED, summary = "Cancelled"),
-                )
-            )
-            throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "run: failed ($agentId)", e)
-            emit(SubagentEvent.Failed(agentId, e.message ?: e.javaClass.simpleName))
+            // 正常完成：非空结果或已达重试上限 → 结束；空结果 → 追加提示重跑
+            if (attempt >= maxAttempts || !result.isEmptyResult) {
+                emit(SubagentEvent.Finished(agentId, result))
+                return@flow
+            }
+            Log.w(TAG, "run: empty result on attempt $attempt, retrying ($agentId)")
+            attempt++
+            messages = messages + UIMessage.user(EMPTY_RESULT_RETRY_HINT)
         }
     }
 
@@ -260,6 +287,10 @@ class SubagentRunner(
             appendLine()
             append(contract.systemPrompt)
         }
+
+        // 通用效率指南：一次成稿、只交付结果、先落盘再返回、减少工具往返
+        appendLine()
+        append(SubagentResultContract.EFFICIENCY_GUIDELINES)
     }.trim()
 
     private fun buildUserMessage(envelope: TaskEnvelope): String = buildString {
