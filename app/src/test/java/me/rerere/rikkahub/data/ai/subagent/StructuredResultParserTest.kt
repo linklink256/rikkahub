@@ -280,6 +280,30 @@ class StructuredResultParserTest {
         assertEquals(raw, text)
     }
 
+    // ---- 空结果判定 ----
+
+    @Test
+    fun `empty result detection`() {
+        assertTrue(AgentResult().isEmptyResult)
+        assertTrue(AgentResult(summary = "").isEmptyResult)
+        assertFalse(AgentResult(summary = "x").isEmptyResult)
+        assertFalse(AgentResult(deliverable = "content").isEmptyResult)
+        assertFalse(AgentResult(sections = mapOf("Bugs" to listOf("b1"))).isEmptyResult)
+        assertFalse(AgentResult(findings = listOf("f1")).isEmptyResult)
+    }
+
+    // ---- 效率指南 ----
+
+    @Test
+    fun `efficiency guidelines cover iteration and empty-hand issues`() {
+        val guidelines = SubagentResultContract.EFFICIENCY_GUIDELINES
+
+        assertTrue(guidelines.contains("ONE pass"))
+        assertTrue(guidelines.contains("Never return empty-handed"))
+        assertTrue(guidelines.contains("WRITE IT FIRST"))
+        assertTrue(guidelines.contains("skip self-verification"))
+    }
+
     @Test
     fun `contract prompt requires deliverable first then result block`() {
         val contract = SubagentResultContract.forRole(null)
