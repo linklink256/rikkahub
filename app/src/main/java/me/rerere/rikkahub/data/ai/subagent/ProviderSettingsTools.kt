@@ -2,7 +2,11 @@ package me.rerere.rikkahub.data.ai.subagent
 
 import kotlinx.serialization.json.buildJsonObject
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
+import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.effectiveReasoningEffort
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.SettingsStore
 
@@ -56,6 +60,18 @@ fun createProviderSettingsTools(
                                     "    - ${provider.name}:$modelPart  ($display) [$chatTag" +
                                         if (abilityTag.isNotBlank()) ", $abilityTag]" else "]"
                                 )
+                                // 推理模型：附加 effort 支持说明（基于供应商 baseUrl 的官方映射）
+                                if (model.abilities.contains(ModelAbility.REASONING)) {
+                                    val host = (provider as? ProviderSetting.OpenAI)?.baseUrl
+                                    val maxEffort = model.effectiveReasoningEffort(ReasoningLevel.MAX, host)
+                                    val xhighEffort = model.effectiveReasoningEffort(ReasoningLevel.XHIGH, host)
+                                    appendLine(
+                                        "      reasoning effort: max->${maxEffort?.value ?: "?"}, " +
+                                            "xhigh->${xhighEffort?.value ?: "?"}, " +
+                                            "high->${model.effectiveReasoningEffort(ReasoningLevel.HIGH, host)?.value ?: "?"}, " +
+                                            "low->${model.effectiveReasoningEffort(ReasoningLevel.LOW, host)?.value ?: "?"}"
+                                    )
+                                }
                             }
                         }
                     }

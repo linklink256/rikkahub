@@ -36,8 +36,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.effectiveReasoningEffort
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Idea
 import me.rerere.hugeicons.stroke.Idea01
@@ -57,8 +55,6 @@ fun ReasoningButton(
     onlyIcon: Boolean = false,
     reasoningLevel: ReasoningLevel,
     onUpdateReasoningLevel: (ReasoningLevel) -> Unit,
-    model: Model? = null,
-    providerHost: String? = null,
 ) {
     var showPicker by remember { mutableStateOf(false) }
 
@@ -67,8 +63,6 @@ fun ReasoningButton(
             reasoningLevel = reasoningLevel,
             onDismissRequest = { showPicker = false },
             onUpdateReasoningLevel = onUpdateReasoningLevel,
-            model = model,
-            providerHost = providerHost,
         )
     }
 
@@ -98,8 +92,6 @@ fun ReasoningPicker(
     reasoningLevel: ReasoningLevel,
     onDismissRequest: () -> Unit = {},
     onUpdateReasoningLevel: (ReasoningLevel) -> Unit,
-    model: Model? = null,
-    providerHost: String? = null,
 ) {
     val currentIndex = levels.indexOf(reasoningLevel).coerceAtLeast(0)
     var sliderValue by remember { mutableFloatStateOf(currentIndex.toFloat()) }
@@ -135,29 +127,6 @@ fun ReasoningPicker(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
-            }
-
-            // 实际生效 effort 预览：基于当前模型能力 + 供应商映射计算
-            model?.let { m ->
-                val effective = m.effectiveReasoningEffort(reasoningLevel, providerHost)
-                if (effective != null) {
-                    Text(
-                        text = buildString {
-                            append(stringResource(R.string.reasoning_picker_effort_preview, effective.value))
-                            if (effective.isCapped) {
-                                append(" (")
-                                append(stringResource(R.string.reasoning_picker_effort_capped, effective.note.orEmpty()))
-                                append(")")
-                            }
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (effective.isCapped) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
             }
 
             // 当前等级展示
