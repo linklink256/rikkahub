@@ -350,6 +350,19 @@ object SubagentResultContract {
 
     /** assistant 预填充消息：引导模型从结构化结果开头续写 */
     const val PREFILL: String = "## Agent Result (SUCCESS)\n\n"
+
+    /**
+     * 通用效率指南：注入所有子代理（含 raw 模式）。
+     * 针对流水线复盘问题：写手自我迭代（A1）、验收要求繁琐（A3）、首轮空手返回（C1）。
+     * 措辞为指南而非硬性约束，避免影响需要多轮工具协作的复杂任务。
+     */
+    val EFFICIENCY_GUIDELINES: String = buildString {
+        appendLine("## Efficiency Guidelines")
+        appendLine("- Write the deliverable in ONE pass; do not iterate on your own output (no repeated edit/review cycles) unless there is a concrete error to fix.")
+        appendLine("- Deliver the RESULT, not the process: skip self-verification steps (wc, re-reads, diff, JSON checks) unless the task explicitly asks for them — verification is the caller's job.")
+        appendLine("- If the task produces files or content, WRITE IT FIRST, then summarize briefly. Never return empty-handed.")
+        appendLine("- Minimize tool round-trips: compose the full content in your head first, then write it once.")
+    }.trim()
 }
 
 /** 角色级输出契约：自定义段落名 + 注入 system prompt 的格式说明 + prefill + raw 模式标记 */
