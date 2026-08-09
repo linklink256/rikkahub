@@ -65,6 +65,11 @@ fun createSubagentManagementTools(
                             "workspace file tools (read / write / edit / shell rm) — no dedicated tools needed."
                     )
                     appendLine(
+                        "Session memory (platform auto): each role persists a memory file at " +
+                            "/workspace/.cache/subagent-memory/<name>.md across calls. " +
+                            "Memory may be stale — for time-sensitive data ask the subagent to read the actual file, never answer from memory alone."
+                    )
+                    appendLine(
                         "Enabled status comes from the assistant's enabledSubagents list (empty = all enabled). " +
                             "A role listed as disabled cannot be delegated to via the subagent tool."
                     )
