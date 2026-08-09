@@ -280,6 +280,69 @@ class StructuredResultParserTest {
         assertEquals(raw, text)
     }
 
+    // ---- json 模式 ----
+
+    @Test
+    fun `forRole with json marker returns json contract`() {
+        val contract = SubagentResultContract.forRole("json")
+
+        assertTrue(contract.json)
+        assertFalse(contract.raw)
+        assertEquals(emptyList<String>(), contract.sections)
+        assertEquals("", contract.prefill)
+        assertTrue(contract.systemPrompt.contains("SINGLE valid JSON object"))
+    }
+
+    @Test
+    fun `json mode parses plain json object`() {
+        val raw = """{"status":"FAILED","summary":"boom","risks":["r1"]}"""
+
+        val result = StructuredResultParser.parse(raw, jsonMode = true)
+
+        assertEquals(AgentResultStatus.FAILED, result.status)
+        assertEquals("boom", result.summary)
+        assertEquals(listOf("r1"), result.risks)
+    }
+
+    @Test
+    fun `json mode extracts object from fenced or annotated output`() {
+        val raw = """
+            Here is the result:
+            ```json
+            {"status":"SUCCESS","summary":"wrapped","findings":["f1"]}
+            ```
+            end
+        """.trimIndent()
+
+        val result = StructuredResultParser.parse(raw, jsonMode = true)
+
+        assertEquals(AgentResultStatus.SUCCESS, result.status)
+        assertEquals("wrapped", result.summary)
+        assertEquals(listOf("f1"), result.findings)
+    }
+
+    @Test
+    fun `json mode falls back to full text when no json present`() {
+        val raw = "no json here at all"
+
+        val result = StructuredResultParser.parse(raw, jsonMode = true)
+
+        assertEquals(AgentResultStatus.SUCCESS, result.status)
+        assertEquals(raw, result.summary)
+    }
+
+    @Test
+    fun `json mode is independent of raw mode`() {
+        val raw = """{"status":"SUCCESS","summary":"x"}"""
+
+        val rawResult = StructuredResultParser.parse(raw, rawMode = true)
+        val jsonResult = StructuredResultParser.parse(raw, jsonMode = true)
+
+        assertTrue(rawResult.raw)
+        assertFalse(jsonResult.raw)
+        assertEquals("x", jsonResult.summary)
+    }
+
     // ---- 空结果判定 ----
 
     @Test
