@@ -4,6 +4,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.JsonArray
@@ -73,6 +74,8 @@ fun createSubagentTool(
             - Subagents have NO memory of previous calls: if the task references an earlier step (e.g. "execute the decision
               from the previous round"), pass that decision inside `context` — do not assume the subagent remembers it.
             - For independent subtasks use mode=parallel (max 8 subtasks); for sequential handoffs use mode=chain.
+            - In parallel mode each subtask must be fully SELF-CONTAINED: put any constraints (paths, formats, acceptance)
+              inside the subtask text itself — the top-level boundary/acceptance/context are NOT forwarded to subtasks.
             - Set `boundary` and `acceptance` to constrain the subagent and verify its result.
 
             Available subagent groups and their enabled members:
@@ -207,6 +210,9 @@ fun createSubagentTool(
             val settings = settingsStore.settingsFlow.first()
             val toolPool = toolPoolProvider().filter { it.name != "subagent" }
             val log = StringBuilder()
+            // 会话间记忆锁：并行任务共享同一 Mutex，串行化记忆文件的"读-改-写"，
+            // 避免并发写覆盖导致记忆丢失（ISS-002：7 并行任务仅 3 条记忆留存）
+            val memoryLock = Mutex()
 
             val results = when (mode) {
                 SubagentMode.SINGLE -> {
@@ -217,7 +223,7 @@ fun createSubagentTool(
                         context = context,
                         acceptance = acceptance,
                     )
-                    val (result, logText) = runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool)
+                    val (result, logText) = runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool, memoryLock)
                     log.append(logText)
                     listOf(result)
                 }
@@ -233,14 +239,14 @@ fun createSubagentTool(
                         tasks.map { subtask ->
                             async {
                                 semaphore.withPermit {
+                                    // 并行子任务必须完全自包含：不广播顶层 boundary/acceptance/context，
+                                    // 避免主任务约束污染子任务（ISS-001：race.txt 与 T1- 前缀广播导致越权写入）。
+                                    // 主 agent 需要约束某个子任务时，应写进该 subtask 的文本本身。
                                     val envelope = TaskEnvelope(
                                         role = role,
                                         task = subtask,
-                                        boundary = boundary,
-                                        context = context,
-                                        acceptance = acceptance,
                                     )
-                                    runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool)
+                                    runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool, memoryLock)
                                 }
                             }
                         }.awaitAll()
@@ -268,7 +274,7 @@ fun createSubagentTool(
                             context = previous?.toText?.let { "$context\n\n## Previous step result\n$it" } ?: context,
                             acceptance = acceptance,
                         )
-                        val (result, logText) = runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool)
+                        val (result, logText) = runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool, memoryLock)
                         log.append(logText)
                         chainResults += result
                         previous = result
@@ -299,6 +305,7 @@ private suspend fun runAndCollect(
     settings: me.rerere.rikkahub.data.datastore.Settings,
     model: Model,
     toolPool: List<Tool>,
+    memoryLock: Mutex? = null,
 ): Pair<AgentResult, String> {
     // 每个调用独立日志（StringBuilder 非线程安全；并行模式共享实例会崩溃）
     val log = StringBuilder()
@@ -312,6 +319,7 @@ private suspend fun runAndCollect(
         parentModel = model,
         toolPool = toolPool.associateBy { it.name },
         memoryFile = memoryFile,
+        memoryLock = memoryLock,
     ).collect { event ->
         when (event) {
             is SubagentEvent.Started -> log.appendLine("▶ [${event.role}] ${event.task}")
