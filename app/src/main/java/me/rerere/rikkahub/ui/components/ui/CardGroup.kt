@@ -46,6 +46,7 @@ private data class CardGroupItem(
     val leadingContent: (@Composable () -> Unit)?,
     val trailingContent: (@Composable () -> Unit)?,
     val colors: ListItemColors?,
+    val content: (@Composable () -> Unit)?,
 )
 
 @DslMarker
@@ -61,6 +62,7 @@ interface CardGroupScope {
         leadingContent: (@Composable () -> Unit)? = null,
         trailingContent: (@Composable () -> Unit)? = null,
         colors: ListItemColors? = null,
+        content: (@Composable () -> Unit)? = null,
         headlineContent: @Composable () -> Unit,
     )
 }
@@ -76,6 +78,7 @@ private class CardGroupScopeImpl : CardGroupScope {
         leadingContent: (@Composable () -> Unit)?,
         trailingContent: (@Composable () -> Unit)?,
         colors: ListItemColors?,
+        content: (@Composable () -> Unit)?,
         headlineContent: @Composable () -> Unit,
     ) {
         items.add(
@@ -88,6 +91,7 @@ private class CardGroupScopeImpl : CardGroupScope {
                 leadingContent = leadingContent,
                 trailingContent = trailingContent,
                 colors = colors,
+                content = content,
             )
         )
     }
@@ -141,6 +145,22 @@ private fun CardGroupListItem(
         trailingContent = item.trailingContent,
         colors = item.colors ?: CustomColors.listItemColors,
     )
+    // 额外的内容区（如权限申请按钮）：渲染在 ListItem 下方，保持圆角一致
+    item.content?.let { content ->
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                .clip(
+                    RoundedCornerShape(
+                        bottomStart = bottomCorner,
+                        bottomEnd = bottomCorner,
+                    )
+                )
+        ) {
+            content()
+        }
+    }
 }
 
 @Composable

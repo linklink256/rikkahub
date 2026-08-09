@@ -1308,7 +1308,10 @@
   <string name="setting_page_devices">Device Management</string>
   <string name="setting_page_devices_desc">Manage Conch and SSH terminal devices for the AI assistant</string>
   <string name="assistant_page_local_tools_phone_files_title">Phone Files</string>
-  <string name="assistant_page_local_tools_phone_files_desc">Let the AI list, read, write and delete files inside the app private storage</string>
+  <string name="assistant_page_local_tools_phone_files_desc">Let the AI read, write, list, search and manage files across the device (internal / external storage, SD card). Requires All Files Access on Android 11+.</string>
+  <string name="assistant_page_local_tools_phone_files_permission_granted">All Files Access permission granted</string>
+  <string name="assistant_page_local_tools_phone_files_permission_hint">To access all files on the device, grant "All Files Access". Without it, only the app private directory can be used.</string>
+  <string name="assistant_page_local_tools_phone_files_grant_permission">Grant All Files Access</string>
   <string name="assistant_page_local_tools_shell_title">Terminal Devices (Shell)</string>
   <string name="assistant_page_local_tools_shell_desc">Let the AI execute shell commands and read/write files on your configured Conch or SSH devices</string>
   <!-- Remote Devices (extensions) -->

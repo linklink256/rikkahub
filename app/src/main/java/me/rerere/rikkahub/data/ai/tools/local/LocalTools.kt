@@ -29,7 +29,7 @@ class LocalTools(
 
     val calendarCreateTool by lazy { buildCalendarCreateTool(context) }
 
-    val phoneFilesTool by lazy { buildPhoneFileTool(context) }
+    val fileSystemTools by lazy { buildFileSystemTools(context) }
 
     fun getTools(options: List<LocalToolOption>): List<Tool> {
         val tools = mutableListOf<Tool>()
@@ -56,7 +56,7 @@ class LocalTools(
             tools.add(calendarCreateTool)
         }
         if (options.contains(LocalToolOption.PhoneFiles)) {
-            tools.add(phoneFilesTool)
+            tools.addAll(fileSystemTools)
         }
         if (options.contains(LocalToolOption.Shell)) {
             tools.addAll(shellToolProvider.getTools())

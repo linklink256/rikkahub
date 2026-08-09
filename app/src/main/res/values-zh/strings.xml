@@ -1307,7 +1307,10 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_page_devices">设备管理</string>
   <string name="setting_page_devices_desc">管理可供 AI 助手使用的 Conch 和 SSH 终端设备</string>
   <string name="assistant_page_local_tools_phone_files_title">手机文件</string>
-  <string name="assistant_page_local_tools_phone_files_desc">允许 AI 在应用私有存储目录中列出、读取、写入和删除文件</string>
+  <string name="assistant_page_local_tools_phone_files_desc">允许 AI 读取、写入、列出、搜索和管理设备上的文件（内部/外部存储、SD 卡）。Android 11+ 需要「所有文件访问权限」。</string>
+  <string name="assistant_page_local_tools_phone_files_permission_granted">已获得所有文件访问权限</string>
+  <string name="assistant_page_local_tools_phone_files_permission_hint">要访问设备上的所有文件，需要授予「所有文件访问权限」。未授权时只能访问应用私有目录。</string>
+  <string name="assistant_page_local_tools_phone_files_grant_permission">授予所有文件访问权限</string>
   <string name="assistant_page_local_tools_shell_title">终端设备（Shell）</string>
   <string name="assistant_page_local_tools_shell_desc">允许 AI 在已配置的 Conch 或 SSH 设备上执行 Shell 命令及读写文件</string>
   <!-- 远程设备（扩展页，工作区风格） -->

@@ -1,27 +1,47 @@
 package me.rerere.rikkahub.ui.pages.assistant.detail
 
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.composables.icons.lucide.Check
+import com.composables.icons.lucide.FolderOpen
+import com.composables.icons.lucide.Lucide
 import com.dokar.sonner.ToastType
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
@@ -238,6 +258,70 @@ private fun AssistantLocalToolContent(
                         checked = assistant.localTools.contains(LocalToolOption.PhoneFiles),
                         onCheckedChange = { toggleLocalTool(LocalToolOption.PhoneFiles, it) }
                     )
+                },
+                content = {
+                    // 仅 Android 11+ 且启用时显示"所有文件访问权限"状态/申请按钮
+                    if (assistant.localTools.contains(LocalToolOption.PhoneFiles) &&
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                    ) {
+                        val context = LocalContext.current
+                        var hasAllFiles by remember {
+                            mutableStateOf(Environment.isExternalStorageManager())
+                        }
+                        LifecycleResumeEffect(Unit) {
+                            hasAllFiles = Environment.isExternalStorageManager()
+                            onPauseOrDispose { }
+                        }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                        ) {
+                            if (hasAllFiles) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Lucide.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.assistant_page_local_tools_phone_files_permission_granted),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    text = stringResource(R.string.assistant_page_local_tools_phone_files_permission_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                                            data = Uri.parse("package:${context.packageName}")
+                                        }
+                                        runCatching {
+                                            context.startActivity(intent)
+                                        }.onFailure {
+                                            context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Lucide.FolderOpen,
+                                        contentDescription = null,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                    Text(stringResource(R.string.assistant_page_local_tools_phone_files_grant_permission))
+                                }
+                            }
+                        }
+                    }
                 }
             )
             item(
