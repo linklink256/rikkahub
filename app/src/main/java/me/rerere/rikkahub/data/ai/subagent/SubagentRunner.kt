@@ -116,7 +116,7 @@ class SubagentRunner(
         // - tools 非空 → 只保留白名单内的工具
         val allowedTools = when {
             definition.toolsDisabled -> emptyList()
-            definition.tools.isEmpty() -> toolPool.values
+            definition.tools.isEmpty() -> toolPool.values.toList()
             else -> toolPool.values.filter { it.name in definition.tools }
         }
 
