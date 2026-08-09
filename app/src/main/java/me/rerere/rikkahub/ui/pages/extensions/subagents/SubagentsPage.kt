@@ -87,8 +87,6 @@ fun SubagentsPage() {
     var showImportDialog by rememberSaveable { mutableStateOf(false) }
     var editing by remember { mutableStateOf<SubagentMetadata?>(null) }
     var deleteTarget by remember { mutableStateOf<SubagentMetadata?>(null) }
-    // 分组折叠状态：按组名记录，默认全部展开
-    var collapsedGroups by rememberSaveable { mutableStateOf(setOf<String>()) }
     // 按组分组；default 组始终排在最后
     val groups = remember(subagents) {
         subagents
@@ -96,6 +94,8 @@ fun SubagentsPage() {
             .toList()
             .sortedBy { (group, _) -> if (group == SubagentManager.DEFAULT_GROUP) 1 else 0 }
     }
+    // 分组折叠状态：默认全部收起（组列表变化时重置为全部收起），点击组头展开
+    var collapsedGroups by remember(subagents) { mutableStateOf(groups.map { it.first }.toSet()) }
     val fileImportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
