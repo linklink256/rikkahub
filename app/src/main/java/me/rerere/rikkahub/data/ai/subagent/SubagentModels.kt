@@ -90,6 +90,11 @@ data class AgentResult(
             items.forEach { appendLine("- $it") }
         }
     }
+
+    /** 是否为空结果（无任何可交付内容）——用于触发空结果自动重试 */
+    val isEmptyResult: Boolean
+        get() = summary.isBlank() && deliverable.isBlank() &&
+            findings.isEmpty() && changes.isEmpty() && risks.isEmpty() && sections.isEmpty()
 }
 
 enum class AgentResultStatus {
