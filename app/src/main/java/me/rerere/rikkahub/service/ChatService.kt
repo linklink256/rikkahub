@@ -546,7 +546,7 @@ class ChatService(
                 tools = buildList {
                     // 子代理管理工具始终可用：主 agent 可自行创建/删除角色（类似 skills）。
                     // 置于工具池最前，确保模型能优先看到委派能力。
-                    addAll(createSubagentManagementTools(subagentManager, assistant.enabledSubagents))
+                    addAll(createSubagentManagementTools(subagentManager, settingsStore, assistant.enabledSubagents))
 
                     // 系统设置查询工具：主 agent 可查看供应商/模型，为子代理指定 model
                     addAll(createProviderSettingsTools(settingsStore))

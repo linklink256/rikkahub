@@ -546,6 +546,8 @@
   <string name="reasoning_off">Off</string>
   <string name="reasoning_off_desc">Turn off reasoning functionality, the model will directly answer questions.</string>
   <string name="reasoning_picker_hint">Not all models support depth adjustment. Refer to the model and provider documentation.</string>
+  <string name="reasoning_picker_effort_preview">Effective effort: %1$s</string>
+  <string name="reasoning_picker_effort_capped">%1$s</string>
   <string name="reasoning_picker_title">Adjust Model Thinking Depth</string>
   <string name="reasoning_xhigh">XHigh</string>
   <string name="regenerate">Regenerate</string>
@@ -917,6 +919,8 @@
   <string name="setting_page_web_server_start">Start</string>
   <string name="setting_page_web_server_stop">Stop</string>
   <string name="setting_provider_page_abilities">Abilities</string>
+  <string name="setting_provider_page_reasoning_effort_preview">Reasoning %1$s -> effective effort: %2$s</string>
+  <string name="setting_provider_page_reasoning_effort_capped">%1$s</string>
   <string name="setting_provider_page_add">Add</string>
   <string name="setting_provider_page_add_model">Add Model</string>
   <string name="setting_provider_page_add_models_hint">Click the button below to add models</string>

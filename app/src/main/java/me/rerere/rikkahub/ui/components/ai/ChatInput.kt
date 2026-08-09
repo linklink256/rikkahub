@@ -295,6 +295,7 @@ fun ChatInput(
                                         onUpdateAssistant(assistant.copy(reasoningLevel = it))
                                     },
                                     onlyIcon = true,
+                                    model = model,
                                 )
                             }
 

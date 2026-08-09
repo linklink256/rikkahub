@@ -91,6 +91,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
@@ -99,6 +100,7 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.effectiveReasoningEffort
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.R
@@ -621,7 +623,8 @@ private fun ModelSettingsForm(
                                 abilities = model.abilities,
                                 onUpdateAbilities = {
                                     onModelChange(model.copy(abilities = it))
-                                }
+                                },
+                                model = model,
                             )
                         }
                     }
@@ -1120,7 +1123,9 @@ private fun ModelModalitySelector(
 @Composable
 fun ModalAbilitySelector(
     abilities: List<ModelAbility>,
-    onUpdateAbilities: (List<ModelAbility>) -> Unit
+    onUpdateAbilities: (List<ModelAbility>) -> Unit,
+    model: Model? = null,
+    reasoningLevel: ReasoningLevel? = null,
 ) {
     Text(
         stringResource(R.string.setting_provider_page_abilities),
@@ -1150,6 +1155,29 @@ fun ModalAbilitySelector(
                         )
                     )
                 }
+            )
+        }
+    }
+    // REASONING 能力开启时：展示"实际生效的 effort"预览（基于当前模型的推理档位）
+    if (abilities.contains(ModelAbility.REASONING) && model != null) {
+        val level = reasoningLevel ?: ReasoningLevel.HIGH
+        val effective = model.effectiveReasoningEffort(level)
+        if (effective != null) {
+            Text(
+                text = buildString {
+                    append(stringResource(R.string.setting_provider_page_reasoning_effort_preview, level.name.lowercase(), effective.value))
+                    if (effective.isCapped) {
+                        append(" (")
+                        append(stringResource(R.string.setting_provider_page_reasoning_effort_capped, effective.note.orEmpty()))
+                        append(")")
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (effective.isCapped) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
             )
         }
     }

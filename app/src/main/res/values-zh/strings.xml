@@ -541,6 +541,8 @@
   <string name="reasoning_off">关闭</string>
   <string name="reasoning_off_desc">关闭推理功能，模型将直接回答问题。</string>
   <string name="reasoning_picker_hint">并非所有模型都支持深度调整。请参考模型和提供商文档。</string>
+  <string name="reasoning_picker_effort_preview">实际生效档位：%1$s</string>
+  <string name="reasoning_picker_effort_capped">%1$s</string>
   <string name="reasoning_picker_title">调整模型思考深度</string>
   <string name="reasoning_xhigh">超高</string>
   <string name="reasoning_max">最高</string>
@@ -898,6 +900,8 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_page_web_server_start">启动</string>
   <string name="setting_page_web_server_stop">停止</string>
   <string name="setting_provider_page_abilities">能力</string>
+  <string name="setting_provider_page_reasoning_effort_preview">推理档位 %1$s -> 实际生效 effort: %2$s</string>
+  <string name="setting_provider_page_reasoning_effort_capped">%1$s</string>
   <string name="setting_provider_page_add">添加</string>
   <string name="setting_provider_page_add_model">添加模型</string>
   <string name="setting_provider_page_add_models_hint">点击下方按钮添加模型</string>

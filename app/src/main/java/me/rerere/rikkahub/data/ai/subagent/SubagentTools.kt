@@ -3,7 +3,9 @@ package me.rerere.rikkahub.data.ai.subagent
 import kotlinx.serialization.json.buildJsonObject
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
+import me.rerere.ai.provider.effectiveReasoningEffort
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.SubagentManager
 
 /**
@@ -19,6 +21,7 @@ import me.rerere.rikkahub.data.files.SubagentManager
  */
 fun createSubagentManagementTools(
     subagentManager: SubagentManager,
+    settingsStore: SettingsStore,
     enabledSubagents: Set<String> = emptySet(),
 ): List<Tool> = listOf(
     Tool(
@@ -62,6 +65,9 @@ fun createSubagentManagementTools(
                                 }
                             )
                             appendLine("    model: ${s.model ?: "(inherit main agent)"}")
+                            appendLine("    reasoning: ${s.reasoningLevel?.name ?: "(inherit default OFF)"}")
+                            // 实际生效 effort：解析角色模型（无 model 时无法确定 → 标注继承）
+                            appendLine("    effective effort: ${resolveEffortLine(s, settingsStore)}")
                             appendLine("    resultFormat: ${s.resultFormat ?: "(default: Summary, Findings, Changes, Risks)"}")
                         }
                     }
@@ -85,3 +91,46 @@ fun createSubagentManagementTools(
         }
     ),
 )
+
+/**
+ * 解析子代理角色实际生效的 effort 值（供 list_subagents 展示）。
+ *
+ * - 角色未声明 model → 继承主 agent 模型，无法在此确定 → 标注 "(inherit main agent, unknown)"
+ * - 角色声明的模型未在设置中配置 → "(model not configured)"
+ * - 模型无 REASONING 能力 → "(no effect: model lacks REASONING ability)"
+ * - 正常 → 显示实际 effort + 截断说明
+ */
+private fun resolveEffortLine(
+    s: me.rerere.rikkahub.data.files.SubagentMetadata,
+    settingsStore: SettingsStore,
+): String {
+    val level = s.reasoningLevel ?: me.rerere.ai.core.ReasoningLevel.OFF
+    val modelName = s.model?.trim().orEmpty()
+    if (modelName.isEmpty()) {
+        return "$level (inherit main agent model, unknown)"
+    }
+    // 解析模型：支持 'Provider/Model' / 'Provider:Model' / 裸模型名
+    val slashIndex = modelName.indexOf('/')
+    val colonIndex = modelName.indexOf(':')
+    val sepIndex = listOf(slashIndex, colonIndex).filter { it >= 0 }.minOrNull()
+    val providerFilter = if (sepIndex != null) modelName.substring(0, sepIndex).trim() else null
+    val modelPart = if (sepIndex != null) modelName.substring(sepIndex + 1).trim() else modelName
+
+    val settings = settingsStore.settingsFlow.value
+    val model = settings.providers.firstNotNullOfOrNull { provider ->
+        if (providerFilter != null && !provider.name.equals(providerFilter, ignoreCase = true)) {
+            return@firstNotNullOfOrNull null
+        }
+        provider.models.firstOrNull { it.modelId == modelPart || it.displayName == modelPart }
+    }
+    if (model == null) {
+        return "$level (model '$modelName' not configured)"
+    }
+    val effective = model.effectiveReasoningEffort(level)
+        ?: return "$level (no effect: model lacks REASONING ability)"
+    return if (effective.isCapped) {
+        "${effective.value} (capped: ${effective.note})"
+    } else {
+        effective.value
+    }
+}
