@@ -52,6 +52,15 @@ class SubagentRunner(
         private const val TAG = "SubagentRunner"
         private const val DEFAULT_TIMEOUT_MILLIS = 10 * 60 * 1000L
 
+        /** 默认最大工具调用轮数：防止模型空耗循环（反复调工具无进展） */
+        private const val DEFAULT_MAX_STEPS = 30
+
+        /** 默认单步工具执行超时（毫秒）：防止某个工具（网络请求等）卡死拖住整轮 */
+        private const val DEFAULT_STEP_TIMEOUT_MILLIS = 120_000L
+
+        /** 连续相同工具调用（工具名+参数完全一致）达到该次数 → 判定死循环，提前终止 */
+        private const val REPEATED_CALL_LIMIT = 5
+
         /** 空结果自动重试的最大尝试次数（首次 + 重试一次） */
         private const val MAX_EMPTY_RETRY_ATTEMPTS = 2
 
@@ -90,6 +99,10 @@ class SubagentRunner(
      *                     避免长任务上下文爆炸（Deep Agents 风格）；0 = 关闭。
      * @param memoryLock   会话间记忆锁：并行任务共享同一 Mutex 时，记忆文件的"读-改-写"会被串行化，
      *                     避免并发写覆盖导致记忆丢失（ISS-002）；null = 不加锁。
+     * @param maxSteps     最大工具调用轮数（空耗防护）。达到上限立即停止并返回已有产出；
+     *                     默认 [DEFAULT_MAX_STEPS]，角色 AGENT.md 的 `maxSteps` 可覆盖。
+     * @param stepTimeoutMillis 单步工具执行超时（毫秒）。某个工具调用超时按失败处理并继续；
+     *                     默认 [DEFAULT_STEP_TIMEOUT_MILLIS]，角色 AGENT.md 的 `stepTimeout`（秒）可覆盖。
      */
     fun run(
         agentId: String = Uuid.random().toString(),
@@ -104,6 +117,8 @@ class SubagentRunner(
         memoryFile: String? = null,
         contextLimit: Int = DEFAULT_CONTEXT_LIMIT,
         memoryLock: Mutex? = null,
+        maxSteps: Int = definition.maxSteps ?: DEFAULT_MAX_STEPS,
+        stepTimeoutMillis: Long = definition.stepTimeoutMillis ?: DEFAULT_STEP_TIMEOUT_MILLIS,
     ): Flow<SubagentEvent> = flow {
         val model = resolveModel(definition, settings, parentModel)
         val providerSetting = model.findProvider(settings.providers)
@@ -168,10 +183,34 @@ class SubagentRunner(
                 withTimeout(timeoutMillis) {
                     // 无步数限制：直到模型不再调用工具（任务完成）或超时
                     var step = 0
+                    // 重复调用检测：记录最近一次工具调用签名（toolName+input），连续相同达到上限判定死循环
+                    var lastCallSignature: String? = null
+                    var repeatedCallCount = 0
                     while (true) {
                         step++
                         emit(SubagentEvent.StepStarted(agentId, step))
                         Log.i(TAG, "run: step $step ($agentId)")
+
+                        // 空耗防护 1：最大步数上限。达到上限立即停止，保留已有产出。
+                        if (step > maxSteps) {
+                            Log.w(TAG, "run: max steps ($maxSteps) reached at step $step ($agentId)")
+                            val partial = parseResult(messages, prefillText, contract)
+                            emit(
+                                SubagentEvent.Finished(
+                                    agentId = agentId,
+                                    result = partial.copy(
+                                        summary = buildString {
+                                            if (partial.summary.isNotBlank()) {
+                                                append(partial.summary)
+                                                append(' ')
+                                            }
+                                            append("(reached max steps $maxSteps)")
+                                        },
+                                    ),
+                                )
+                            )
+                            return@flow
+                        }
 
                         // 上下文管理：历史超阈值时压缩中间消息为摘要（Deep Agents 风格）
                         if (contextLimit > 0 && messages.textChars() > contextLimit) {
@@ -214,10 +253,47 @@ class SubagentRunner(
                             .filter { !it.isExecuted }
                         if (toolsToProcess.isEmpty()) break
 
+                        // 空耗防护 2：重复工具调用检测（相同工具+相同参数连续出现 → 死循环）
+                        val signature = toolsToProcess.joinToString("|") { "${it.toolName}(${it.input.take(200)})" }
+                        if (signature == lastCallSignature) {
+                            repeatedCallCount++
+                            if (repeatedCallCount >= REPEATED_CALL_LIMIT) {
+                                Log.w(TAG, "run: repeated tool calls detected ($repeatedCallCount x same call) at step $step ($agentId)")
+                                val partial = parseResult(messages, prefillText, contract)
+                                emit(
+                                    SubagentEvent.Finished(
+                                        agentId = agentId,
+                                        result = partial.copy(
+                                            summary = buildString {
+                                                if (partial.summary.isNotBlank()) {
+                                                    append(partial.summary)
+                                                    append(' ')
+                                                }
+                                                append("(stopped: repeated identical tool call $repeatedCallCount times)")
+                                            },
+                                        ),
+                                    )
+                                )
+                                return@flow
+                            }
+                        } else {
+                            lastCallSignature = signature
+                            repeatedCallCount = 1
+                        }
+
                         // 执行工具（子 agent 不弹审批，直接执行或按需跳过）
+                        // 空耗防护 3：单步工具超时，卡住的工具按失败处理并继续
                         val executedTools = toolsToProcess.map { tool ->
                             emit(SubagentEvent.ToolCall(agentId, tool.toolName, tool.input))
-                            val output = executeTool(tool, allowedTools, definition)
+                            val output = runCatching {
+                                withTimeout(stepTimeoutMillis) {
+                                    executeTool(tool, allowedTools, definition)
+                                }
+                            }.getOrElse { e ->
+                                if (e is CancellationException) throw e
+                                Log.w(TAG, "run: tool ${tool.toolName} timed out after ${stepTimeoutMillis}ms ($agentId)")
+                                errorOutput("Tool '${tool.toolName}' timed out after ${stepTimeoutMillis / 1000}s")
+                            }
                             val summary = output
                                 .filterIsInstance<UIMessagePart.Text>()
                                 .joinToString(" ") { it.text }

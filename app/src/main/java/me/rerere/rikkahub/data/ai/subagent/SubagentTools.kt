@@ -66,6 +66,8 @@ fun createSubagentManagementTools(
                             )
                             appendLine("    model: ${s.model ?: "(inherit main agent)"}")
                             appendLine("    reasoning: ${s.reasoningLevel?.name ?: "(inherit default OFF)"}")
+                            appendLine("    maxSteps: ${s.maxSteps ?: 30}")
+                            appendLine("    stepTimeout: ${s.stepTimeoutMillis?.div(1000) ?: 120}s")
                             // 实际生效 effort：解析角色模型（无 model 时无法确定 → 标注继承）
                             appendLine("    effective effort: ${resolveEffortLine(s, settingsStore)}")
                             appendLine("    resultFormat: ${s.resultFormat ?: "(default: Summary, Findings, Changes, Risks)"}")

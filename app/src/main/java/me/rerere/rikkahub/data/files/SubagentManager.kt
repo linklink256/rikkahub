@@ -22,6 +22,8 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
  * model: openai:gpt-4o       # 可选，支持 '供应商:模型ID' / '供应商/模型ID' / 裸模型ID；不填则继承主 agent 模型
  * reasoningLevel: high       # 可选，off/auto/low/medium/high/xhigh/max，默认 off（也兼容 reasoning 键）
  * resultFormat: Summary, Findings, Risks   # 可选，自定义输出契约段落名（逗号分隔），默认 Summary/Findings/Changes/Risks
+ * maxSteps: 30               # 可选，最大工具调用轮数（防空耗循环），默认 30
+ * stepTimeout: 120           # 可选，单步工具执行超时秒数，默认 120
  * ---
  * <角色 system prompt 正文>
  * ```
@@ -249,6 +251,11 @@ class SubagentManager(
                     frontmatter["reasoningLevel"] ?: frontmatter["reasoning"]
                 ),
                 resultFormat = frontmatter["resultFormat"]?.takeIf { it.isNotBlank() },
+                maxSteps = frontmatter["maxSteps"]?.trim()?.toIntOrNull()
+                    ?.takeIf { it > 0 },
+                stepTimeoutMillis = frontmatter["stepTimeout"]?.trim()?.toLongOrNull()
+                    ?.takeIf { it > 0 }
+                    ?.let { it * 1000 },
                 agentDir = agentDir,
             )
         }.getOrElse {
@@ -267,6 +274,8 @@ data class SubagentMetadata(
     val model: String? = null,
     val reasoningLevel: ReasoningLevel? = null,
     val resultFormat: String? = null,
+    val maxSteps: Int? = null,             // 最大工具调用轮数（空耗防护），默认 SubagentRunner 兜底值
+    val stepTimeoutMillis: Long? = null,   // 单步工具执行超时（毫秒），默认 SubagentRunner 兜底值
     val agentDir: File,
 ) {
     val agentFile: File get() = agentDir.resolve("AGENT.md")
