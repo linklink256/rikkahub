@@ -12,7 +12,7 @@ import me.rerere.rikkahub.data.repository.FilesRepository
 import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
-import me.rerere.workspace.ProotShellRunner
+import me.rerere.workspace.PersistentProotShellRunner
 import me.rerere.workspace.RootfsInstaller
 import me.rerere.workspace.WorkspaceBindMount
 import me.rerere.workspace.WorkspaceManager
@@ -48,7 +48,9 @@ val repositoryModule = module {
         val context: Context = get()
         WorkspaceManager(
             baseDir = File(context.filesDir, "workspaces"),
-            shellRunner = ProotShellRunner(
+            // 持久 shell：每个 workspace 一个长驻 proot+bash 进程，命令经 stdin/sentinel 协议执行，
+            // 只在首次调用付一次进程启动费（一次性模式每次调用 1~3s）；死亡自动重建，失败回退一次性。
+            shellRunner = PersistentProotShellRunner(
                 nativeLibraryDir = File(context.applicationInfo.nativeLibraryDir),
             ),
             // 同一份挂载表既用于 PRoot 的 -b 参数, 也用于文件工具的路径解析, 避免两处漂移

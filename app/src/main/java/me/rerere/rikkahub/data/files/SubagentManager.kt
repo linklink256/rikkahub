@@ -25,6 +25,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
  * maxSteps: 30               # 可选，最大工具调用轮数（防空耗循环），默认 30
  * stepTimeout: 120           # 可选，单步工具执行超时秒数，默认 120
  * toolOutputLimit: 20000     # 可选，单条工具输出截断字符数（防 prompt 膨胀），默认 20000；<=0 不截断
+ * streaming: false           # 可选，是否流式生成（默认 false 非流式更省时，true 可观察长生成过程）
  * timeout: 300               # 可选，任务总超时秒数，默认 600（10 分钟）
  * ---
  * <角色 system prompt 正文>
@@ -259,6 +260,7 @@ class SubagentManager(
                     ?.takeIf { it > 0 }
                     ?.let { it * 1000 },
                 toolOutputLimit = frontmatter["toolOutputLimit"]?.trim()?.toIntOrNull(),
+                streaming = frontmatter["streaming"]?.trim()?.toBooleanStrictOrNull(),
                 timeoutMillis = frontmatter["timeout"]?.trim()?.toLongOrNull()
                     ?.takeIf { it > 0 }
                     ?.let { it * 1000 },
@@ -283,6 +285,7 @@ data class SubagentMetadata(
     val maxSteps: Int? = null,             // 最大工具调用轮数（空耗防护），默认 SubagentRunner 兜底值
     val stepTimeoutMillis: Long? = null,   // 单步工具执行超时（毫秒），默认 SubagentRunner 兜底值
     val toolOutputLimit: Int? = null,      // 单条工具输出截断阈值（字符），默认 SubagentRunner 兜底值
+    val streaming: Boolean? = null,        // 是否流式生成（默认 false 非流式），默认 SubagentRunner 兜底值
     val timeoutMillis: Long? = null,       // 任务总超时（毫秒），默认 SubagentRunner 兜底值（10 分钟）
     val agentDir: File,
 ) {

@@ -80,6 +80,13 @@ class SubagentRunner(
         /** 单条工具文本输出的默认截断阈值（字符）：超大结果会膨胀后续每轮 prompt，拖慢 TTFT */
         private const val DEFAULT_TOOL_OUTPUT_LIMIT = 20_000
 
+        /**
+         * 默认非流式生成：子代理的中间流式文本无人消费（调用方忽略 Progress 事件），
+         * 非流式 generateText 一次拿完整响应，省掉每个 chunk 的消息列表重建与事件发射开销。
+         * AGENT.md `streaming: true` 可切回流式（如调试长生成过程时）。
+         */
+        private const val DEFAULT_STREAMING = false
+
         /** 记忆文件单次追加的最大字符数 */
         private const val MEMORY_APPEND_LIMIT = 2_000
 
@@ -114,6 +121,9 @@ class SubagentRunner(
      *                     会让后续每一轮的 prompt 膨胀、生成与 TTFT 成倍变慢，超出后截断并提示
      *                     用定点读取拿局部内容；默认 [DEFAULT_TOOL_OUTPUT_LIMIT]，
      *                     角色 AGENT.md 的 `toolOutputLimit` 可覆盖；<=0 表示不截断。
+     * @param streaming    是否流式生成。默认 false（非流式）：子代理的中间流式文本无人消费，
+     *                     非流式省掉 chunk 处理与事件发射开销；角色 AGENT.md 的 `streaming: true`
+     *                     可切回流式（如需要观察长生成过程时）。
      */
     fun run(
         agentId: String = Uuid.random().toString(),
@@ -131,6 +141,7 @@ class SubagentRunner(
         maxSteps: Int = definition.maxSteps ?: DEFAULT_MAX_STEPS,
         stepTimeoutMillis: Long = definition.stepTimeoutMillis ?: DEFAULT_STEP_TIMEOUT_MILLIS,
         toolOutputLimit: Int = definition.toolOutputLimit ?: DEFAULT_TOOL_OUTPUT_LIMIT,
+        streaming: Boolean = definition.streaming ?: DEFAULT_STREAMING,
     ): Flow<SubagentEvent> = flow {
         val model = resolveModel(definition, settings, parentModel)
         val providerSetting = model.findProvider(settings.providers)
@@ -235,16 +246,22 @@ class SubagentRunner(
                             },
                         )
 
-                        // 流式收集模型输出，边收边上报进度
-                        providerImpl.streamText(providerSetting, messages, params).collect { chunk ->
-                            messages = messages.handleMessageChunk(chunk, model)
-                            chunk.choices.firstOrNull()?.delta?.parts.orEmpty()
-                                .filterIsInstance<UIMessagePart.Text>()
-                                .forEach { part ->
-                                    if (part.text.isNotBlank()) {
-                                        emit(SubagentEvent.Progress(agentId, part.text))
+                        if (streaming) {
+                            // 流式：边收边上报进度（中间文本仅 UI 观察用；调用方通常忽略 Progress 事件）
+                            providerImpl.streamText(providerSetting, messages, params).collect { chunk ->
+                                messages = messages.handleMessageChunk(chunk, model)
+                                chunk.choices.firstOrNull()?.delta?.parts.orEmpty()
+                                    .filterIsInstance<UIMessagePart.Text>()
+                                    .forEach { part ->
+                                        if (part.text.isNotBlank()) {
+                                            emit(SubagentEvent.Progress(agentId, part.text))
+                                        }
                                     }
-                                }
+                            }
+                        } else {
+                            // 非流式（默认）：一次拿完整响应，省掉每 chunk 的消息列表重建与事件发射
+                            val chunk = providerImpl.generateText(providerSetting, messages, params)
+                            messages = messages.handleMessageChunk(chunk, model)
                         }
 
                         val lastMessage = messages.lastOrNull() ?: break

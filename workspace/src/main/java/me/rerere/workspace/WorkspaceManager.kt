@@ -42,7 +42,11 @@ class WorkspaceManager(
 
     fun hasRootfs(root: String): Boolean = File(linuxDir(root), "bin/sh").isFile
 
-    fun deleteWorkspace(root: String): Boolean = workspaceDir(root).deleteRecursively()
+    fun deleteWorkspace(root: String): Boolean {
+        // 删除前先关闭该 workspace 的持久 shell 会话（若有），避免残留进程持有已删目录
+        (shellRunner as? PersistentProotShellRunner)?.closeSession(root)
+        return workspaceDir(root).deleteRecursively()
+    }
 
     fun listFiles(
         root: String,
