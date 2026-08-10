@@ -10,6 +10,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,6 +51,9 @@ import me.rerere.rikkahub.data.ai.subagent.SubagentRunner
 import me.rerere.rikkahub.data.ai.subagent.createProviderSettingsTools
 import me.rerere.rikkahub.data.ai.subagent.createSubagentManagementTools
 import me.rerere.rikkahub.data.ai.subagent.createSubagentTool
+import me.rerere.rikkahub.data.ai.tasks.BackgroundTask
+import me.rerere.rikkahub.data.ai.tasks.BackgroundTaskManager
+import me.rerere.rikkahub.data.ai.tasks.createBackgroundTaskTools
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
@@ -97,6 +101,15 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
+
+/** 后台任务回调：相近完成任务的合并等待窗口（防抖） */
+private const val CALLBACK_DEBOUNCE_MS = 1_000L
+
+/** 后台任务回调：等待当前生成结束的最长时间，超时强制注入（不打断无界等待） */
+private const val CALLBACK_MAX_WAIT_MS = 60_000L
+
+/** 后台任务回调消息中单个任务结果的截断长度（防超大结果撑爆回调消息） */
+private const val CALLBACK_RESULT_LIMIT = 12_000
 
 internal fun backgroundTextGenerationParams(
     model: Model,
@@ -155,6 +168,7 @@ class ChatService(
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
     private val folderRepository: FolderRepository,
+    private val backgroundTaskManager: BackgroundTaskManager,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -162,6 +176,11 @@ class ChatService(
     // 子代理：SubagentManager / SubagentRunner 无状态，可安全 lazy 创建
     private val subagentManager by lazy { SubagentManager(context, settingsStore) }
     private val subagentRunner by lazy { SubagentRunner(providerManager) }
+
+    // 后台任务完成回调：注册到管理器，结果注入对话并触发主代理汇报
+    init {
+        backgroundTaskManager.onTaskCompleted = ::onBackgroundTaskCompleted
+    }
 
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -368,6 +387,98 @@ class ChatService(
         }
     }
 
+    // ---- 后台任务回调 ----
+
+    private val callbackQueues = ConcurrentHashMap<Uuid, MutableList<BackgroundTask>>()
+    private val callbackFlushJobs = ConcurrentHashMap<Uuid, Job>()
+
+    private fun onBackgroundTaskCompleted(task: BackgroundTask) {
+        val queue = callbackQueues.getOrPut(task.conversationId) { mutableListOf() }
+        synchronized(queue) { queue.add(task) }
+        scheduleCallbackFlush(task.conversationId)
+    }
+
+    /**
+     * 回调注入调度：防抖合并相近完成的任务（避免并发完成互相打断生成），
+     * 且等待当前对话进行中的生成结束后再注入（用户在等回复时不打断），
+     * 超过 [CALLBACK_MAX_WAIT_MS] 强制注入（回调不能无限等待）。
+     */
+    private fun scheduleCallbackFlush(conversationId: Uuid) {
+        // 已有 flush worker 在等待：新任务进队列即可，由同一 worker 合并处理
+        if (callbackFlushJobs[conversationId]?.isActive == true) return
+        callbackFlushJobs[conversationId] = appScope.launch {
+            addConversationReference(conversationId)
+            try {
+                delay(CALLBACK_DEBOUNCE_MS)
+                val deadline = System.currentTimeMillis() + CALLBACK_MAX_WAIT_MS
+                while (sessions[conversationId]?.isGenerating == true &&
+                    System.currentTimeMillis() < deadline
+                ) {
+                    delay(1_000)
+                }
+                val queue = callbackQueues[conversationId] ?: return@launch
+                val tasks = synchronized(queue) {
+                    queue.toList().also { queue.clear() }
+                }
+                if (tasks.isEmpty()) return@launch
+                injectCallbackMessage(conversationId, tasks)
+            } finally {
+                callbackFlushJobs.remove(conversationId)
+                removeConversationReference(conversationId)
+                // flush 期间又有任务完成但 schedule 判定竞争错过 → 补一轮
+                if (callbackQueues[conversationId]?.isNotEmpty() == true) {
+                    scheduleCallbackFlush(conversationId)
+                }
+            }
+        }
+    }
+
+    /**
+     * 把后台任务结果作为 USER 消息注入对话并触发主代理生成汇报。
+     * 与 [sendMessage] 骨架相同但跳过用户输入预处理（regex 变换不适用于系统回调）。
+     */
+    private fun injectCallbackMessage(conversationId: Uuid, tasks: List<BackgroundTask>) {
+        val session = getOrCreateSession(conversationId)
+        val previousJob = session.getJob()
+        previousJob?.cancel()
+
+        val job = appScope.launch {
+            try {
+                runCatching { previousJob?.join() }
+                finishInterruptedPendingTools(conversationId)
+
+                val text = buildString {
+                    appendLine("[Background Task Callback] The following background task(s) have finished.")
+                    appendLine("这是后台任务完成的自动回调消息（并非用户发送）。请基于结果继续处理：向用户简要汇报，或按先前计划执行后续步骤。")
+                    tasks.forEach { task ->
+                        appendLine()
+                        appendLine("## Task ${task.id} [${task.kind}] ${task.status}")
+                        appendLine("title: ${task.title}")
+                        appendLine("result:")
+                        appendLine(task.result.ifBlank { "(empty)" }.take(CALLBACK_RESULT_LIMIT))
+                    }
+                }.trim()
+
+                val newConversation = session.state.value.copy(
+                    messageNodes = session.state.value.messageNodes + UIMessage(
+                        role = MessageRole.USER,
+                        parts = listOf(UIMessagePart.Text(text)),
+                    ).toMessageNode(),
+                )
+                saveConversation(conversationId, newConversation)
+
+                // 触发主代理读取回调并汇报/行动
+                handleMessageComplete(conversationId)
+
+                _generationDoneFlow.emit(conversationId)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                addError(e, conversationId, title = "Background task callback failed")
+            }
+        }
+        session.setJob(job)
+    }
+
     // ---- 重新生成消息 ----
 
     fun regenerateAtMessage(
@@ -548,6 +659,9 @@ class ChatService(
                     // 置于工具池最前，确保模型能优先看到委派能力。
                     addAll(createSubagentManagementTools(subagentManager, settingsStore, assistant.enabledSubagents))
 
+                    // 后台任务管理工具：查询/取消异步执行的任务（subagent background、shell background）
+                    addAll(createBackgroundTaskTools(backgroundTaskManager))
+
                     // 系统设置查询工具：主 agent 可查看供应商/模型，为子代理指定 model
                     addAll(createProviderSettingsTools(settingsStore))
 
@@ -566,6 +680,8 @@ class ChatService(
                                 toolPoolProvider = { toolPoolRef.get() },
                                 model = model,
                                 enabledSubagents = assistant.enabledSubagents,
+                                backgroundTaskManager = backgroundTaskManager,
+                                conversationId = conversationId,
                             )
                         )
                     }
@@ -577,7 +693,7 @@ class ChatService(
                     if (assistant.enableRecentChatsReference) {
                         addAll(createConversationTools(conversationRepo, assistant.id))
                     }
-                    addAll(createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), conversation.workspaceCwd))
+                    addAll(createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), conversation.workspaceCwd, conversationId))
                     if (assistant.enabledSkills.isNotEmpty()) {
                         addAll(
                             createSkillTools(
@@ -674,7 +790,11 @@ class ChatService(
         }
     }
 
-    private suspend fun createWorkspaceToolsIfReady(workspaceId: String?, cwd: String? = null): List<Tool> {
+    private suspend fun createWorkspaceToolsIfReady(
+        workspaceId: String?,
+        cwd: String? = null,
+        conversationId: Uuid? = null,
+    ): List<Tool> {
         if (workspaceId.isNullOrBlank()) return emptyList()
         val workspace = workspaceRepository.getById(workspaceId) ?: return emptyList()
         if (workspace.shellStatus != WorkspaceShellStatus.READY.name) {
@@ -684,7 +804,7 @@ class ChatService(
             )
             return emptyList()
         }
-        return createWorkspaceTools(workspaceId, workspaceRepository, cwd)
+        return createWorkspaceTools(workspaceId, workspaceRepository, cwd, backgroundTaskManager, conversationId)
     }
 
     // ---- 检查无效消息 ----

@@ -74,6 +74,10 @@ val appModule = module {
     }
 
     single {
+        me.rerere.rikkahub.data.ai.tasks.BackgroundTaskManager(appScope = get())
+    }
+
+    single {
         ChatService(
             context = get(),
             appScope = get(),
@@ -89,7 +93,8 @@ val appModule = module {
             filesManager = get(),
             skillManager = get(),
             workspaceRepository = get(),
-            folderRepository = get()
+            folderRepository = get(),
+            backgroundTaskManager = get()
         )
     }
 

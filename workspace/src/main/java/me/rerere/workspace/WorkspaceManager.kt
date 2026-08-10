@@ -215,13 +215,21 @@ class WorkspaceManager(
         cwd: String = "",
         timeoutMillis: Long = DEFAULT_COMMAND_TIMEOUT_MS,
         stdin: ByteArray? = null,
+        oneShot: Boolean = false,
     ): WorkspaceCommandResult {
         require(command.isNotBlank()) { "Command is required" }
         val workingDir = fileSystem.resolve(filesDir(root), cwd)
         require(workingDir.exists()) { "Working directory does not exist: $cwd" }
         require(workingDir.isDirectory) { "Working path is not a directory: $cwd" }
 
-        return shellRunner.execute(
+        // oneShot：绕开持久会话（其锁会串行化命令），后台长命令走一次性进程，
+        // 避免阻塞前台 shell 调用；runner 不支持一次性通道时退回默认 runner。
+        val runner = if (oneShot) {
+            (shellRunner as? PersistentProotShellRunner)?.oneShotRunner ?: shellRunner
+        } else {
+            shellRunner
+        }
+        return runner.execute(
             WorkspaceShellContext(
                 root = root,
                 command = command,

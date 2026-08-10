@@ -19,11 +19,14 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.tasks.BackgroundTaskKind
+import me.rerere.rikkahub.data.ai.tasks.BackgroundTaskManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.SubagentManager
 import me.rerere.rikkahub.data.files.SubagentMetadata
 import me.rerere.rikkahub.data.files.applyEnabledSubagents
 import me.rerere.rikkahub.utils.JsonInstant
+import kotlin.uuid.Uuid
 
 private const val PARALLEL_CONCURRENCY = 4
 private const val MAX_SUBTASKS = 8
@@ -36,7 +39,12 @@ private const val MAX_SUBTASKS = 8
  * - parallel：有界扇出（上限 8 个子任务，并发 4）
  * - chain：顺序 handoff，上一步结果注入下一步
  *
+ * 另支持 `background: true`：委派转为后台任务——立即返回 taskId 不阻塞对话，
+ * 完成后结果以"后台任务回调"消息自动注入对话并触发主代理汇报。
+ *
  * @param toolPoolProvider 延迟获取当前会话的完整工具池（子代理按白名单过滤）
+ * @param backgroundTaskManager 后台任务管理器（background=true 时必须有）
+ * @param conversationId 当前会话 id（后台任务的回调归属）
  */
 fun createSubagentTool(
     subagentManager: SubagentManager,
@@ -45,6 +53,8 @@ fun createSubagentTool(
     toolPoolProvider: () -> List<Tool>,
     model: Model,
     enabledSubagents: Set<String>,
+    backgroundTaskManager: BackgroundTaskManager,
+    conversationId: Uuid,
 ): Tool {
     // 仅用于工具描述中的提示信息；execute 内始终动态读取最新角色列表
     // 快照同样按 enabledSubagents 过滤，保证描述与 systemPrompt 口径一致
@@ -83,6 +93,9 @@ fun createSubagentTool(
             - In parallel mode each subtask must be fully SELF-CONTAINED: put any constraints (paths, formats, acceptance)
               inside the subtask text itself — the top-level boundary/acceptance/context are NOT forwarded to subtasks.
             - Set `boundary` and `acceptance` to constrain the subagent and verify its result.
+            - Set background=true for LONG-running delegations (minutes): the call returns immediately with a taskId,
+              you can keep chatting with the user, and the subagent's result is injected as a callback when done.
+              Use background=false (default) when you need the result to continue the current turn.
 
             Available subagent groups and their enabled members:
             ${buildString {
@@ -179,6 +192,14 @@ fun createSubagentTool(
                         put("items", buildJsonObject { put("type", "string") })
                         put("description", "Subtask list for parallel/chain mode (max 8)")
                     })
+                    put("background", buildJsonObject {
+                        put("type", "boolean")
+                        put(
+                            "description",
+                            "Run the delegation as a background task: returns immediately with a taskId; " +
+                                "the result is injected into the conversation as a callback when done. Defaults to false."
+                        )
+                    })
                 },
                 required = listOf("role", "task"),
             )
@@ -214,96 +235,168 @@ fun createSubagentTool(
                 "chain" -> SubagentMode.CHAIN
                 else -> SubagentMode.SINGLE
             }
+            val background = args["background"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
 
             val settings = settingsStore.settingsFlow.first()
             val toolPool = toolPoolProvider().filter { it.name != "subagent" }
-            val log = StringBuilder()
-            // 会话间记忆锁：并行任务共享同一 Mutex，串行化记忆文件的"读-改-写"，
-            // 避免并发写覆盖导致记忆丢失（ISS-002：7 并行任务仅 3 条记忆留存）
-            val memoryLock = Mutex()
 
-            val results = when (mode) {
-                SubagentMode.SINGLE -> {
-                    val envelope = TaskEnvelope(
-                        role = role,
+            if (background) {
+                // 后台委派：立即返回 taskId，委派结果完成后以回调消息注入对话
+                val taskId = backgroundTaskManager.launch(
+                    kind = BackgroundTaskKind.SUBAGENT,
+                    conversationId = conversationId,
+                    title = "$role: ${task.take(80)}",
+                ) {
+                    runDelegation(
+                        runner = subagentRunner,
+                        definition = definition,
                         task = task,
                         boundary = boundary,
                         context = context,
                         acceptance = acceptance,
+                        subtasks = subtasks,
+                        mode = mode,
+                        settings = settings,
+                        model = model,
+                        toolPool = toolPool,
                     )
-                    val (result, logText) = runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool, memoryLock)
-                    log.append(logText)
-                    listOf(result)
                 }
-                SubagentMode.PARALLEL -> {
-                    val tasks = subtasks.ifEmpty { listOf(task) }
-                    if (tasks.size > MAX_SUBTASKS) {
-                        return@Tool errorText("Too many subtasks (max $MAX_SUBTASKS)")
-                    }
-                    log.appendLine("== Parallel (${tasks.size} subtasks, concurrency $PARALLEL_CONCURRENCY) ==")
-                    val semaphore = Semaphore(PARALLEL_CONCURRENCY)
-                    // 每个子任务使用独立日志（StringBuilder 非线程安全，并发写同一实例会崩溃）
-                    val pairs = coroutineScope {
-                        tasks.map { subtask ->
-                            async {
-                                semaphore.withPermit {
-                                    // 并行子任务必须完全自包含：不广播顶层 boundary/acceptance/context，
-                                    // 避免主任务约束污染子任务（ISS-001：race.txt 与 T1- 前缀广播导致越权写入）。
-                                    // 主 agent 需要约束某个子任务时，应写进该 subtask 的文本本身。
-                                    val envelope = TaskEnvelope(
-                                        role = role,
-                                        task = subtask,
-                                    )
-                                    runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool, memoryLock)
-                                }
-                            }
-                        }.awaitAll()
-                    }
-                    pairs.forEachIndexed { index, (result, logText) ->
-                        log.appendLine()
-                        log.appendLine("-- Subtask ${index + 1}/${pairs.size} --")
-                        log.append(logText)
-                    }
-                    pairs.map { it.first }
-                }
-
-                SubagentMode.CHAIN -> {
-                    val tasks = subtasks.ifEmpty { listOf(task) }
-                    log.appendLine("== Chain (${tasks.size} steps) ==")
-                    val chainResults = mutableListOf<AgentResult>()
-                    var previous: AgentResult? = null
-                    tasks.forEachIndexed { index, subtask ->
-                        log.appendLine()
-                        log.appendLine("-- Step ${index + 1}/${tasks.size} --")
-                        val envelope = TaskEnvelope(
-                            role = role,
-                            task = subtask,
-                            boundary = boundary,
-                            context = previous?.toText?.let { "$context\n\n## Previous step result\n$it" } ?: context,
-                            acceptance = acceptance,
-                        )
-                        val (result, logText) = runAndCollect(subagentRunner, definition, envelope, settings, model, toolPool, memoryLock)
-                        log.append(logText)
-                        chainResults += result
-                        previous = result
-                    }
-                    chainResults
-                }
+                return@Tool listOf(
+                    UIMessagePart.Text(
+                        buildJsonObject {
+                            put("taskId", taskId)
+                            put("status", "started")
+                            put("role", role)
+                            put(
+                                "note",
+                                "Delegation is running in background. The result will be injected into this conversation " +
+                                    "as a \"[Background Task Callback]\" message when done — you can reply to the user now " +
+                                    "and report when the callback arrives. Use the background_tasks tool to check status or cancel."
+                            )
+                        }.toString()
+                    )
+                )
             }
 
-            val text = buildString {
-                append(log)
-                results.forEachIndexed { index, result ->
-                    if (results.size > 1) {
-                        appendLine()
-                        appendLine("--- Result ${index + 1}/${results.size} ---")
-                    }
-                    appendLine(result.toText)
-                }
-            }
+            val text = runDelegation(
+                runner = subagentRunner,
+                definition = definition,
+                task = task,
+                boundary = boundary,
+                context = context,
+                acceptance = acceptance,
+                subtasks = subtasks,
+                mode = mode,
+                settings = settings,
+                model = model,
+                toolPool = toolPool,
+            )
             listOf(UIMessagePart.Text(text))
         },
     )
+}
+
+/**
+ * 执行委派（single/parallel/chain），返回完整结果文本（执行日志 + 各结果块）。
+ * 同步路径直接作为工具结果返回；后台路径作为后台任务的最终结果。
+ */
+private suspend fun runDelegation(
+    runner: SubagentRunner,
+    definition: SubagentMetadata,
+    task: String,
+    boundary: String,
+    context: String,
+    acceptance: String,
+    subtasks: List<String>,
+    mode: SubagentMode,
+    settings: me.rerere.rikkahub.data.datastore.Settings,
+    model: Model,
+    toolPool: List<Tool>,
+): String {
+    val log = StringBuilder()
+    // 会话间记忆锁：并行任务共享同一 Mutex，串行化记忆文件的"读-改-写"，
+    // 避免并发写覆盖导致记忆丢失（ISS-002：7 并行任务仅 3 条记忆留存）
+    val memoryLock = Mutex()
+
+    val results = when (mode) {
+        SubagentMode.SINGLE -> {
+            val envelope = TaskEnvelope(
+                role = definition.name,
+                task = task,
+                boundary = boundary,
+                context = context,
+                acceptance = acceptance,
+            )
+            val (result, logText) = runAndCollect(runner, definition, envelope, settings, model, toolPool, memoryLock)
+            log.append(logText)
+            listOf(result)
+        }
+        SubagentMode.PARALLEL -> {
+            val tasks = subtasks.ifEmpty { listOf(task) }
+            if (tasks.size > MAX_SUBTASKS) {
+                return "error: Too many subtasks (max $MAX_SUBTASKS)"
+            }
+            log.appendLine("== Parallel (${tasks.size} subtasks, concurrency $PARALLEL_CONCURRENCY) ==")
+            val semaphore = Semaphore(PARALLEL_CONCURRENCY)
+            // 每个子任务使用独立日志（StringBuilder 非线程安全，并发写同一实例会崩溃）
+            val pairs = coroutineScope {
+                tasks.map { subtask ->
+                    async {
+                        semaphore.withPermit {
+                            // 并行子任务必须完全自包含：不广播顶层 boundary/acceptance/context，
+                            // 避免主任务约束污染子任务（ISS-001：race.txt 与 T1- 前缀广播导致越权写入）。
+                            // 主 agent 需要约束某个子任务时，应写进该 subtask 的文本本身。
+                            val envelope = TaskEnvelope(
+                                role = definition.name,
+                                task = subtask,
+                            )
+                            runAndCollect(runner, definition, envelope, settings, model, toolPool, memoryLock)
+                        }
+                    }
+                }.awaitAll()
+            }
+            pairs.forEachIndexed { index, (result, logText) ->
+                log.appendLine()
+                log.appendLine("-- Subtask ${index + 1}/${pairs.size} --")
+                log.append(logText)
+            }
+            pairs.map { it.first }
+        }
+
+        SubagentMode.CHAIN -> {
+            val tasks = subtasks.ifEmpty { listOf(task) }
+            log.appendLine("== Chain (${tasks.size} steps) ==")
+            val chainResults = mutableListOf<AgentResult>()
+            var previous: AgentResult? = null
+            tasks.forEachIndexed { index, subtask ->
+                log.appendLine()
+                log.appendLine("-- Step ${index + 1}/${tasks.size} --")
+                val envelope = TaskEnvelope(
+                    role = definition.name,
+                    task = subtask,
+                    boundary = boundary,
+                    context = previous?.toText?.let { "$context\n\n## Previous step result\n$it" } ?: context,
+                    acceptance = acceptance,
+                )
+                val (result, logText) = runAndCollect(runner, definition, envelope, settings, model, toolPool, memoryLock)
+                log.append(logText)
+                chainResults += result
+                previous = result
+            }
+            chainResults
+        }
+    }
+
+    return buildString {
+        append(log)
+        results.forEachIndexed { index, result ->
+            if (results.size > 1) {
+                appendLine()
+                appendLine("--- Result ${index + 1}/${results.size} ---")
+            }
+            appendLine(result.toText)
+        }
+    }
 }
 
 private suspend fun runAndCollect(

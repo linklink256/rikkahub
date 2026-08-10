@@ -11,6 +11,8 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.DiffMetadata
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.toMetadata
+import me.rerere.rikkahub.data.ai.tasks.BackgroundTaskKind
+import me.rerere.rikkahub.data.ai.tasks.BackgroundTaskManager
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.utils.generateUnifiedDiff
@@ -18,6 +20,7 @@ import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceManager
 import org.koin.java.KoinJavaComponent.getKoin
 import java.io.ByteArrayOutputStream
+import kotlin.uuid.Uuid
 
 private const val SHELL_TIMEOUT_MAX_SECONDS = 600L
 private const val MAX_READ_FILE_BYTES = 8L * 1024 * 1024
@@ -36,6 +39,8 @@ suspend fun createWorkspaceTools(
     workspaceId: String?,
     workspaceRepository: WorkspaceRepository,
     cwd: String? = null,
+    backgroundTaskManager: BackgroundTaskManager? = null,
+    conversationId: Uuid? = null,
 ): List<Tool> {
     if (workspaceId.isNullOrBlank()) return emptyList()
     val approvalOverrides = workspaceRepository.getById(workspaceId)?.toolApprovalOverrides().orEmpty()
@@ -47,7 +52,7 @@ suspend fun createWorkspaceTools(
         createReadFileTool(workspaceId, ::needsApproval, workspaceRepository),
         createWriteFileTool(workspaceId, ::needsApproval, workspaceRepository),
         createEditFileTool(workspaceId, ::needsApproval, workspaceRepository),
-        createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd),
+        createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd, backgroundTaskManager, conversationId),
     )
 }
 
@@ -204,6 +209,8 @@ private fun createShellTool(
     needsApproval: (String) -> Boolean,
     workspaceRepository: WorkspaceRepository,
     defaultCwd: String? = null,
+    backgroundTaskManager: BackgroundTaskManager? = null,
+    conversationId: Uuid? = null,
 ) = Tool(
     name = "workspace_shell",
     description = buildString {
@@ -212,7 +219,12 @@ private fun createShellTool(
         if (!defaultCwd.isNullOrBlank()) {
             append("Defaults to '$defaultCwd'. ")
         }
-        append("Requires Rootfs to be installed and ready.")
+        append("Requires Rootfs to be installed and ready. ")
+        if (backgroundTaskManager != null && conversationId != null) {
+            append("Set background=true for LONG-running commands (builds, downloads, batch jobs): ")
+            append("it returns immediately with a taskId and the command output is injected as a callback when done, ")
+            append("instead of blocking this conversation. ")
+        }
     },
     parameters = {
         InputSchema.Obj(
@@ -239,6 +251,16 @@ private fun createShellTool(
                         "Command timeout in seconds. Defaults to 30, max $SHELL_TIMEOUT_MAX_SECONDS."
                     )
                 })
+                if (backgroundTaskManager != null && conversationId != null) {
+                    put("background", buildJsonObject {
+                        put("type", "boolean")
+                        put(
+                            "description",
+                            "Run in background: return immediately with a taskId; the result is injected into " +
+                                "the conversation as a callback when done. For long commands (builds, downloads). Defaults to false."
+                        )
+                    })
+                }
             },
             required = listOf("command"),
         )
@@ -253,9 +275,20 @@ private fun createShellTool(
             ?.coerceIn(1L, SHELL_TIMEOUT_MAX_SECONDS)
             ?.times(1_000L)
             ?: WorkspaceManager.DEFAULT_COMMAND_TIMEOUT_MS
-        val result = workspaceRepository.executeCommand(workspaceId, command, cwd, timeoutMillis)
-        listOf(
-            UIMessagePart.Text(
+        val background = params["background"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+
+        if (background) {
+            if (backgroundTaskManager == null || conversationId == null) {
+                error("background=true is not available in this session")
+            }
+            // 后台执行走一次性进程（oneShot=true），不占用持久 shell 会话的串行锁，
+            // 避免长命令阻塞前台 shell 调用；后台任务对进程启动开销不敏感。
+            val taskId = backgroundTaskManager.launch(
+                kind = BackgroundTaskKind.SHELL,
+                conversationId = conversationId,
+                title = "shell: ${command.take(80)}",
+            ) {
+                val result = workspaceRepository.executeCommand(workspaceId, command, cwd, timeoutMillis, oneShot = true)
                 buildJsonObject {
                     put("exitCode", result.exitCode)
                     put("stdout", result.stdout)
@@ -263,8 +296,35 @@ private fun createShellTool(
                     put("timedOut", result.timedOut)
                     if (result.truncated) put("truncated", true)
                 }.toString()
+            }
+            listOf(
+                UIMessagePart.Text(
+                    buildJsonObject {
+                        put("taskId", taskId)
+                        put("status", "started")
+                        put(
+                            "note",
+                            "Command is running in background. Its output will be injected into this conversation " +
+                                "as a \"[Background Task Callback]\" message when done — you can reply to the user now " +
+                                "and report when the callback arrives. Use the background_tasks tool to check status or cancel."
+                        )
+                    }.toString()
+                )
             )
-        )
+        } else {
+            val result = workspaceRepository.executeCommand(workspaceId, command, cwd, timeoutMillis)
+            listOf(
+                UIMessagePart.Text(
+                    buildJsonObject {
+                        put("exitCode", result.exitCode)
+                        put("stdout", result.stdout)
+                        put("stderr", result.stderr)
+                        put("timedOut", result.timedOut)
+                        if (result.truncated) put("truncated", true)
+                    }.toString()
+                )
+            )
+        }
     },
 )
 

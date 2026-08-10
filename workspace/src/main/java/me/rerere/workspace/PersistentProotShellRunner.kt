@@ -52,6 +52,13 @@ class PersistentProotShellRunner(
 ) : WorkspaceShellRunner {
     private val logger = Logger.getLogger(TAG)
     private val fallback by lazy { ProotShellRunner(nativeLibraryDir, patcher) }
+
+    /**
+     * 一次性执行通道（每调用一个新 PRoot 进程，不占用持久会话的串行锁）。
+     * 后台任务的长命令走这里：后台执行对进程启动开销不敏感，
+     * 且避免一条长命令把前台 shell 调用全堵在持久会话锁外。
+     */
+    val oneShotRunner: WorkspaceShellRunner get() = fallback
     private val sessions = HashMap<String, PersistentShellSession>()
     private val sessionsLock = Any()
 
