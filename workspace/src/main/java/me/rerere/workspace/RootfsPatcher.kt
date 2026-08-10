@@ -4,6 +4,9 @@ import java.io.File
 import java.nio.file.Files
 
 class RootfsPatcher {
+    // 同轮多工具并行执行时会并发触发 patch（每个 PRoot 进程启动前都会调用）；
+    // patch 内部是"读-改-写"小文件操作（resolv.conf 等），并发交错可能写出损坏内容，故串行化。
+    @Synchronized
     fun patch(
         linuxDir: File,
         options: RootfsPatchOptions = RootfsPatchOptions(),

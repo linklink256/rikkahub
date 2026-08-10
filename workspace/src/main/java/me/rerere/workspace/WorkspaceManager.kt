@@ -128,7 +128,7 @@ class WorkspaceManager(
 
         // 内核伪文件系统: 显式拒绝, 而不是回落到一个必然读不到的物理路径
         KERNEL_FS_MOUNTS.firstOrNull { trimmed == it || trimmed.startsWith("$it/") }?.let {
-            error("$it is a kernel filesystem and cannot be read as a file, use workspace_shell instead")
+            error("$it is a kernel filesystem and cannot be accessed as a file, use workspace_shell instead")
         }
 
         return RootfsLocation(linuxDir(root), trimmed.trimStart('/'))
@@ -141,6 +141,34 @@ class WorkspaceManager(
         val file = resolveRootfsFile(root, path)
         file.requireReadableFile(path)
         outputStream.use { out -> file.inputStream().use { it.copyTo(out) } }
+    }
+
+    /**
+     * 按 Rootfs 内绝对路径写入文本文件（JVM 直接 IO，不经过 PRoot）。
+     *
+     * 与 rootfsFileSize/exportRootfsFile 共用 [resolveRootfsPath] 的路径映射：
+     * /workspace、bind mount 与 Rootfs 内部路径都解析到宿主机真实文件后直写。
+     * 相比经 PRoot `cat > file` 的旧实现，省掉每次写文件的进程启动开销（约 1~3s/次）。
+     *
+     * 语义与旧实现一致：overwrite=false 且目标已存在 → 报错；目标存在且非文件 → 报错；
+     * 父目录自动创建。返回 entry 的 path 保持为 Rootfs 内绝对路径（与旧 proot 写一致）。
+     */
+    fun writeRootfsText(
+        root: String,
+        path: String,
+        text: String,
+        overwrite: Boolean = true,
+    ): WorkspaceFileEntry {
+        val location = resolveRootfsPath(root, path)
+        val entry = try {
+            fileSystem.writeText(location.rootDir, location.relativePath, text, overwrite)
+        } catch (e: IllegalArgumentException) {
+            throw IllegalArgumentException("${e.message} (path: $path)", e)
+        }
+        return entry.copy(
+            path = path,
+            name = path.trimEnd('/').substringAfterLast('/').ifBlank { "/" },
+        )
     }
 
     private fun resolveRootfsFile(root: String, path: String): File {

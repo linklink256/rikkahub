@@ -68,6 +68,12 @@ fun createSubagentTool(
             - You need a different model or a focused tool whitelist for a subtask.
             - The task would bloat the conversation history with long file dumps or repetitive steps.
 
+            WHEN NOT TO USE (delegation has fixed overhead):
+            - Small or quick tasks you could finish yourself with a few tool calls: a subagent starts with
+              ZERO conversation context and must re-read/re-discover what you already know, plus its result
+              costs an extra round-trip back to you. For small tasks, do the work directly — it is faster.
+            - Tasks that depend on nuanced details from earlier in this conversation (the subagent cannot see them).
+
             HOW TO DELEGATE:
             - Pick the best matching role; if unsure, pick the closest one and describe the task precisely.
             - Provide a self-contained `task`; include only a minimal `context` summary, never the full history.

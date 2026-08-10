@@ -3,11 +3,15 @@ package me.rerere.rikkahub.data.ai.subagent
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -73,6 +77,9 @@ class SubagentRunner(
         /** 上下文压缩阈值（字符）：超过后自动把历史压缩成摘要（Deep Agents 风格） */
         private const val DEFAULT_CONTEXT_LIMIT = 90_000
 
+        /** 单条工具文本输出的默认截断阈值（字符）：超大结果会膨胀后续每轮 prompt，拖慢 TTFT */
+        private const val DEFAULT_TOOL_OUTPUT_LIMIT = 20_000
+
         /** 记忆文件单次追加的最大字符数 */
         private const val MEMORY_APPEND_LIMIT = 2_000
 
@@ -103,6 +110,10 @@ class SubagentRunner(
      *                     默认 [DEFAULT_MAX_STEPS]，角色 AGENT.md 的 `maxSteps` 可覆盖。
      * @param stepTimeoutMillis 单步工具执行超时（毫秒）。某个工具调用超时按失败处理并继续；
      *                     默认 [DEFAULT_STEP_TIMEOUT_MILLIS]，角色 AGENT.md 的 `stepTimeout`（秒）可覆盖。
+     * @param toolOutputLimit 单条工具文本输出的截断阈值（字符）。超大工具结果（如误读大文件）
+     *                     会让后续每一轮的 prompt 膨胀、生成与 TTFT 成倍变慢，超出后截断并提示
+     *                     用定点读取拿局部内容；默认 [DEFAULT_TOOL_OUTPUT_LIMIT]，
+     *                     角色 AGENT.md 的 `toolOutputLimit` 可覆盖；<=0 表示不截断。
      */
     fun run(
         agentId: String = Uuid.random().toString(),
@@ -119,6 +130,7 @@ class SubagentRunner(
         memoryLock: Mutex? = null,
         maxSteps: Int = definition.maxSteps ?: DEFAULT_MAX_STEPS,
         stepTimeoutMillis: Long = definition.stepTimeoutMillis ?: DEFAULT_STEP_TIMEOUT_MILLIS,
+        toolOutputLimit: Int = definition.toolOutputLimit ?: DEFAULT_TOOL_OUTPUT_LIMIT,
     ): Flow<SubagentEvent> = flow {
         val model = resolveModel(definition, settings, parentModel)
         val providerSetting = model.findProvider(settings.providers)
@@ -257,23 +269,42 @@ class SubagentRunner(
 
                         // 执行工具（子 agent 不弹审批，直接执行或按需跳过）
                         // 空耗防护 3：单步工具超时，卡住的工具按失败处理并继续
-                        val executedTools = toolsToProcess.map { tool ->
+                        //
+                        // 同轮多工具并行执行：写/shell 类工具各自有独立的进程与 IO 开销
+                        // （PRoot 进程启动等），串行会把开销逐个累加；模型在同一轮发出多个
+                        // 独立调用时并行执行可显著缩短墙钟时间。
+                        // 注意 flow collector 非线程安全：ToolCall 事件先统一发出，
+                        // ToolResult 在全部完成后按原顺序补发，保持事件流有序。
+                        toolsToProcess.forEach { tool ->
                             emit(SubagentEvent.ToolCall(agentId, tool.toolName, tool.input))
-                            val output = runCatching {
-                                withTimeout(stepTimeoutMillis) {
-                                    executeTool(tool, allowedTools, definition)
+                        }
+                        val executedTools = coroutineScope {
+                            toolsToProcess.map { tool ->
+                                async {
+                                    // withTimeoutOrNull：单步超时返回 null → 按失败继续；
+                                    // 总超时/用户取消抛 CancellationException → 照常向上传播。
+                                    // （旧实现用 withTimeout + catch 里 rethrow CancellationException，
+                                    // 但 TimeoutCancellationException 是其子类，单步超时会被误抛成整任务 TIMEOUT）
+                                    val output = runCatching {
+                                        withTimeoutOrNull(stepTimeoutMillis) {
+                                            executeTool(tool, allowedTools, definition)
+                                        } ?: errorOutput("Tool '${tool.toolName}' timed out after ${stepTimeoutMillis / 1000}s")
+                                    }.getOrElse { e ->
+                                        if (e is CancellationException) throw e
+                                        Log.w(TAG, "run: tool ${tool.toolName} failed ($agentId)", e)
+                                        errorOutput("[${e.javaClass.name}] ${e.message}")
+                                    }
+                                    // 超大输出截断：防止膨胀后续每轮 prompt（read 上限 8MB，误读大文件时致命）
+                                    tool.copy(output = truncateToolOutput(output, toolOutputLimit))
                                 }
-                            }.getOrElse { e ->
-                                if (e is CancellationException) throw e
-                                Log.w(TAG, "run: tool ${tool.toolName} timed out after ${stepTimeoutMillis}ms ($agentId)")
-                                errorOutput("Tool '${tool.toolName}' timed out after ${stepTimeoutMillis / 1000}s")
-                            }
-                            val summary = output
+                            }.awaitAll()
+                        }
+                        executedTools.forEach { executed ->
+                            val summary = executed.output
                                 .filterIsInstance<UIMessagePart.Text>()
                                 .joinToString(" ") { it.text }
                                 .take(200)
-                            emit(SubagentEvent.ToolResult(agentId, tool.toolName, summary))
-                            tool.copy(output = output)
+                            emit(SubagentEvent.ToolResult(agentId, executed.toolName, summary))
                         }
 
                         // 将工具输出回填到最后一条消息，继续下一轮
@@ -626,6 +657,32 @@ class SubagentRunner(
     }
 
     // ---- 上下文管理（Deep Agents 风格：超长自动压缩）----
+
+    /**
+     * 截断超大工具文本输出：大文件误读（read 上限 8MB）会让后续每一轮的 prompt 膨胀、
+     * 生成与 TTFT 成倍变慢。截断后提示模型改用定点读取（head/tail/grep/sed）拿局部内容。
+     * limit <= 0 时不截断。
+     */
+    private fun truncateToolOutput(output: List<UIMessagePart>, limit: Int): List<UIMessagePart> {
+        if (limit <= 0) return output
+        return output.map { part ->
+            if (part is UIMessagePart.Text && part.text.length > limit) {
+                part.copy(
+                    text = buildString {
+                        append(part.text.take(limit))
+                        append("\n\n... (truncated: showing first ")
+                        append(limit)
+                        append(" of ")
+                        append(part.text.length)
+                        append(" chars. Use targeted reads for the rest: ")
+                        append("workspace_shell with head/tail/sed/grep, or read a smaller file/range.)")
+                    }
+                )
+            } else {
+                part
+            }
+        }
+    }
 
     /** 消息文本总字符数（仅统计 Text part） */
     private fun List<UIMessage>.textChars(): Int =

@@ -249,6 +249,18 @@ class WorkspaceRepository(
         manager.exportRootfsFile(workspace.root, path, outputStream)
     }
 
+    /** 按 Rootfs 内绝对路径写入文本（JVM 直接 IO，不经 PRoot，省进程启动开销） */
+    suspend fun writeRootfsText(
+        id: String,
+        path: String,
+        text: String,
+        overwrite: Boolean = true,
+    ): WorkspaceFileEntry = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        manager.ensureWorkspace(workspace.root)
+        manager.writeRootfsText(workspace.root, path, text, overwrite)
+    }
+
     suspend fun deleteFile(
         id: String,
         area: WorkspaceStorageArea,

@@ -400,7 +400,8 @@ object SubagentResultContract {
 
     /**
      * 通用效率指南：注入所有子代理（含 raw/json 模式）。
-     * 针对流水线复盘问题：写手自我迭代（A1）、验收要求繁琐（A3）、首轮空手返回（C1）。
+     * 针对流水线复盘问题：写手自我迭代（A1）、验收要求繁琐（A3）、首轮空手返回（C1）、
+     * 一轮一个工具调用串行 drip（耗时主因）、工具调用前后铺垫文本（无人看但耗生成时间）。
      * 措辞为指南而非硬性约束，避免影响需要多轮工具协作的复杂任务。
      */
     val EFFICIENCY_GUIDELINES: String = buildString {
@@ -409,6 +410,8 @@ object SubagentResultContract {
         appendLine("- Deliver the RESULT, not the process: skip self-verification steps (wc, re-reads, diff, JSON checks) unless the task explicitly asks for them — verification is the caller's job.")
         appendLine("- If the task produces files or content, WRITE IT FIRST, then summarize briefly. Never return empty-handed.")
         appendLine("- Minimize tool round-trips: compose the full content in your head first, then write it once.")
+        appendLine("- Batch independent tool calls: when you need several independent reads or commands, emit ALL of them in ONE turn as parallel tool calls — never drip them out one call per turn.")
+        appendLine("- No narration around tool calls: text written between tool calls is never shown to the user — emit tool calls directly, without \"I will now read ...\" commentary.")
         appendLine("- PERSIST deliverables to files under /workspace whenever file tools are available — files survive, reply text does not. The reply should only summarize what was written.")
     }.trim()
 }
