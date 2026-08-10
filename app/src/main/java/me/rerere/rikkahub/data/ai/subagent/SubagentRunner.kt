@@ -180,6 +180,8 @@ class SubagentRunner(
         var attempt = 1
         while (true) {
             val result = try {
+                // 空耗防护触发原因：在 withTimeout 内置位，lambda 外读取（lambda 内不能 return@flow）
+                var guardStopReason: String? = null
                 withTimeout(timeoutMillis) {
                     // 无步数限制：直到模型不再调用工具（任务完成）或超时
                     var step = 0
@@ -194,22 +196,8 @@ class SubagentRunner(
                         // 空耗防护 1：最大步数上限。达到上限立即停止，保留已有产出。
                         if (step > maxSteps) {
                             Log.w(TAG, "run: max steps ($maxSteps) reached at step $step ($agentId)")
-                            val partial = parseResult(messages, prefillText, contract)
-                            emit(
-                                SubagentEvent.Finished(
-                                    agentId = agentId,
-                                    result = partial.copy(
-                                        summary = buildString {
-                                            if (partial.summary.isNotBlank()) {
-                                                append(partial.summary)
-                                                append(' ')
-                                            }
-                                            append("(reached max steps $maxSteps)")
-                                        },
-                                    ),
-                                )
-                            )
-                            return@flow
+                            guardStopReason = "reached max steps $maxSteps"
+                            break
                         }
 
                         // 上下文管理：历史超阈值时压缩中间消息为摘要（Deep Agents 风格）
@@ -259,22 +247,8 @@ class SubagentRunner(
                             repeatedCallCount++
                             if (repeatedCallCount >= REPEATED_CALL_LIMIT) {
                                 Log.w(TAG, "run: repeated tool calls detected ($repeatedCallCount x same call) at step $step ($agentId)")
-                                val partial = parseResult(messages, prefillText, contract)
-                                emit(
-                                    SubagentEvent.Finished(
-                                        agentId = agentId,
-                                        result = partial.copy(
-                                            summary = buildString {
-                                                if (partial.summary.isNotBlank()) {
-                                                    append(partial.summary)
-                                                    append(' ')
-                                                }
-                                                append("(stopped: repeated identical tool call $repeatedCallCount times)")
-                                            },
-                                        ),
-                                    )
-                                )
-                                return@flow
+                                guardStopReason = "stopped: repeated identical tool call $repeatedCallCount times"
+                                break
                             }
                         } else {
                             lastCallSignature = signature
@@ -312,6 +286,27 @@ class SubagentRunner(
                         }
                         messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts)
                     }
+                    // 空耗防护触发原因传给 withTimeout 外层（lambda 内不能 return@flow）
+                    guardStopReason
+                }
+                // 空耗防护触发：停止后解析已有产出并返回（带停止原因）
+                if (guardStopReason != null) {
+                    val partial = parseResult(messages, prefillText, contract)
+                    emit(
+                        SubagentEvent.Finished(
+                            agentId = agentId,
+                            result = partial.copy(
+                                summary = buildString {
+                                    if (partial.summary.isNotBlank()) {
+                                        append(partial.summary)
+                                        append(' ')
+                                    }
+                                    append("($guardStopReason)")
+                                },
+                            ),
+                        )
+                    )
+                    return@flow
                 }
                 parseResult(messages, prefillText, contract)
             } catch (e: TimeoutCancellationException) {
