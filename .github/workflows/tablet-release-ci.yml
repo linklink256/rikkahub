@@ -1,0 +1,69 @@
+name: Tablet Release CI
+on:
+  push:
+    branches: [tablet-release-20261028]
+    paths: [.github/workflows/tablet-release-ci.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Android SDK packages
+        run: |
+          set -euo pipefail
+          exec > >(tee /tmp/tablet-sdk.log) 2>&1
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-37.2' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Web dependencies
+        working-directory: web-ui
+        run: pnpm install --frozen-lockfile
+      - name: Build optimized unsigned release
+        run: |
+          set -euo pipefail
+          exec > >(tee /tmp/tablet-build.log) 2>&1
+          chmod +x gradlew
+          ./gradlew :app:assembleGithubRelease --no-daemon --no-parallel --max-workers=2 -Dorg.gradle.jvmargs='-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process --console=plain
+      - name: Package signing handoff
+        run: |
+          mkdir -p /tmp/handoff
+          cp app/build/outputs/apk/github/release/*arm64*.apk /tmp/handoff/
+          cp app/build/outputs/mapping/githubRelease/mapping.txt /tmp/handoff/ || true
+          git rev-parse HEAD > /tmp/handoff/SOURCE_COMMIT.txt
+          cd /tmp/handoff
+          sha256sum *.apk > SHA256SUMS
+          zip -q /tmp/tablet-unsigned-handoff.zip ./*
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: tablet-build-handoff-20261028
+          target_commitish: tablet-release-20261028
+          name: 'Unsigned build handoff — NOT final installable release'
+          prerelease: true
+          body: 'Build handoff for private local signing. No signing keys or user data. Final signed APK will be published separately.'
+          files: /tmp/tablet-unsigned-handoff.zip
+      - name: Failure diagnostics
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view tablet-build-diagnostics-20261028 >/dev/null 2>&1 || gh release create tablet-build-diagnostics-20261028 --prerelease --title 'Build diagnostics — not APK' --notes 'CI diagnostics without signing credentials.'
+          for f in /tmp/tablet-sdk.log /tmp/tablet-build.log; do
+            test ! -f "$f" || gh release upload tablet-build-diagnostics-20261028 "$f" --clobber
+          done
