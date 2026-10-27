@@ -1,0 +1,82 @@
+name: Tablet Release Build
+on:
+  push:
+    branches: [tablet-release-20261028]
+    paths: [.github/workflows/tablet-release-build.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: tablet-release-build
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Import checked source snapshot
+        env:
+          SOURCE_URL: http://117.55.230.183/.well-known/acme-challenge/rikkahub-tablet-c2b88e38dd0cee9ba1886da6/source.tar.gz
+          SOURCE_SHA256: 32e348346db3c49eb84169fc96e18ca3f56817e13e95f50da0a869c9d5bbd9d1
+        run: |
+          set -euo pipefail
+          cp .github/workflows/tablet-release-build.yml /tmp/tablet-release-build.yml
+          curl --fail --location --retry 3 "$SOURCE_URL" -o /tmp/source.tar.gz
+          echo "$SOURCE_SHA256  /tmp/source.tar.gz" | sha256sum -c -
+          git rm -r --ignore-unmatch . >/dev/null
+          tar xzf /tmp/source.tar.gz -C .
+          cp /tmp/tablet-release-build.yml .github/workflows/tablet-release-build.yml
+          test ! -e local.properties
+          test ! -d results
+          test -z "$(find . -path './.git' -prune -o \( -name '*.p12' -o -name '*.keystore' -o -name '*.jks' \) -print)"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet || git commit -m 'Import audited Tablet source snapshot 03257cb8'
+          git push origin HEAD:tablet-release-20261028
+          git submodule update --init --recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-37.2' 'build-tools;36.0.0' 'ndk;29.0.14206865' 'cmake;3.22.1'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+      - name: Install web dependencies
+        working-directory: web-ui
+        run: pnpm install --frozen-lockfile
+      - name: Build optimized unsigned ARM64 release
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleGithubRelease --no-daemon --no-parallel --max-workers=2 -Dorg.gradle.jvmargs='-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process --console=plain
+      - name: Package unsigned handoff (NOT installable final release)
+        run: |
+          mkdir -p /tmp/tablet-handoff
+          cp app/build/outputs/apk/github/release/*arm64*.apk /tmp/tablet-handoff/
+          cp app/build/outputs/mapping/githubRelease/mapping.txt /tmp/tablet-handoff/ || true
+          git rev-parse HEAD > /tmp/tablet-handoff/SOURCE_COMMIT.txt
+          cd /tmp/tablet-handoff
+          sha256sum *.apk > SHA256SUMS
+          zip -q /tmp/tablet-unsigned-handoff.zip ./*
+      - name: Publish build handoff only
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: tablet-build-handoff-20261028
+          name: 'Build handoff — unsigned, NOT final installable release'
+          prerelease: true
+          target_commitish: tablet-release-20261028
+          body: 'CI handoff for local private-key signing. This is NOT the final installable APK. No signing key or user data is included.'
+          files: /tmp/tablet-unsigned-handoff.zip
