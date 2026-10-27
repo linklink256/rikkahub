@@ -14,6 +14,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -30,11 +31,23 @@ class DebugVM(
     val settings: StateFlow<Settings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Lazily, Settings.dummy())
 
+    val launchCount: StateFlow<Int> = settingsStore.launchCountFlow
+        .stateIn(viewModelScope, SharingStarted.Lazily, 0)
+
+    fun setLaunchCount(count: Int) {
+        viewModelScope.launch { settingsStore.setLaunchCount(count) }
+    }
+
     private val _conversationCount = MutableStateFlow<Int?>(null)
     val conversationCount: StateFlow<Int?> = _conversationCount.asStateFlow()
 
+    // 聊天记录中引用的助手 ID -> 对话数
+    private val _conversationAssistants = MutableStateFlow<Map<Uuid, Int>?>(null)
+    val conversationAssistants: StateFlow<Map<Uuid, Int>?> = _conversationAssistants.asStateFlow()
+
     init {
         refreshConversationCount()
+        scanConversationAssistants()
     }
 
     fun refreshConversationCount() {
@@ -43,9 +56,37 @@ class DebugVM(
         }
     }
 
-    fun updateSettings(settings: Settings) {
+    fun scanConversationAssistants() {
         viewModelScope.launch {
-            settingsStore.update(settings)
+            _conversationAssistants.value = conversationRepository.countConversationsByAssistant()
+        }
+    }
+
+    /**
+     * 为聊天记录中引用、但设置里已不存在的助手 ID 创建占位助手，使这些聊天记录重新可见
+     * @return 恢复的助手数量, settings 未加载时返回 null
+     */
+    suspend fun recoverAssistantsFromConversations(): Int? {
+        val settings = settingsStore.settingsFlow.value
+        if (settings.init) return null
+        val conversationAssistants = conversationRepository.countConversationsByAssistant()
+        _conversationAssistants.value = conversationAssistants
+        val existingIds = settings.assistants.map { it.id }.toSet()
+        val missing = conversationAssistants
+            .filterKeys { it !in existingIds }
+            .entries
+            .sortedByDescending { it.value }
+        if (missing.isEmpty()) return 0
+        val recovered = missing.mapIndexed { index, (id, _) ->
+            Assistant(id = id, name = "恢复的助手 ${index + 1}")
+        }
+        settingsStore.update { it.copy(assistants = it.assistants + recovered) }
+        return recovered.size
+    }
+
+    fun updateSettings(fn: (Settings) -> Settings) {
+        viewModelScope.launch {
+            settingsStore.update(fn)
         }
     }
 

@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
+import androidx.paging.filter
 import androidx.paging.insertSeparators
 import androidx.paging.map
 import kotlinx.coroutines.flow.Flow
@@ -18,31 +19,63 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.MemoryConsolidationScheduler
+import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Folder
+import me.rerere.rikkahub.data.repository.AgentTeamConversationIndex
+import me.rerere.rikkahub.data.repository.AgentTeamRepository
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
+import me.rerere.rikkahub.data.repository.memoryId
+import me.rerere.rikkahub.service.AgentTeamService
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.TeamMemberView
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.uuid.Uuid
 
+/** 抽屉里的团队视图：Lead 会话 + 它的队友（点箭头进入） */
+data class DrawerTeamView(
+    val leadConversationId: Uuid,
+    val title: String,
+    val members: List<TeamMemberView>,
+)
+
+/** 一次会话列表查询的输入 */
+private data class ConversationListQuery(
+    val assistantId: Uuid,
+    val folderId: Uuid?,
+    val sortOrder: ConversationSortOrder,
+    val hiddenConversationIds: Set<Uuid>,
+)
+
 class ChatDrawerVM(
     private val context: Application,
     private val settingsStore: SettingsStore,
-    conversationRepo: ConversationRepository,
+    private val conversationRepo: ConversationRepository,
     private val folderRepo: FolderRepository,
     private val chatService: ChatService,
+    private val memoryConsolidationScheduler: MemoryConsolidationScheduler,
     private val savedStateHandle: SavedStateHandle,
+    private val agentTeamRepository: AgentTeamRepository,
+    private val agentTeamService: AgentTeamService,
 ) : ViewModel() {
 
     private val assistantIdFlow = settingsStore.settingsFlow
         .map { it.assistantId }
+        .distinctUntilChanged()
+
+    private val sortOrderFlow = settingsStore.settingsFlow
+        .map { it.displaySetting.conversationSortOrder }
         .distinctUntilChanged()
 
     // 当前选中的文件夹筛选，null 表示「未归类」视图
@@ -54,69 +87,65 @@ class ChatDrawerVM(
         .flatMapLatest { folderRepo.getFoldersOfAssistant(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val conversations: Flow<PagingData<ConversationListItem>> =
-        combine(assistantIdFlow, _selectedFolderId) { assistantId, folderId ->
-            assistantId to folderId
+    // 当前助手的记忆库是否正在后台整理；没开记忆的助手即使共用的全局记忆库在整理也不显示
+    val memoryDreaming: StateFlow<Boolean> = settingsStore.settingsFlow
+        .map { settings -> settings.getCurrentAssistant().takeIf { it.enableMemory }?.memoryId }
+        .distinctUntilChanged()
+        .flatMapLatest { memoryId ->
+            if (memoryId == null) flowOf(false) else memoryConsolidationScheduler.statusOf(memoryId).map { it.running }
         }
-            .flatMapLatest { (assistantId, folderId) ->
-                if (folderId == null) {
-                    conversationRepo.getUnfiledConversationsOfAssistantPaging(assistantId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    /** Lead / 队友会话索引：主列表据此隐藏队友会话，并给 Lead 行加团队入口 */
+    val teamIndex: StateFlow<AgentTeamConversationIndex> =
+        agentTeamRepository.observeConversationIndex()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AgentTeamConversationIndex.EMPTY)
+
+    // 点箭头进入的团队视图；null 表示普通会话列表
+    private val _teamView = MutableStateFlow<DrawerTeamView?>(null)
+    val teamView: StateFlow<DrawerTeamView?> = _teamView.asStateFlow()
+
+    val conversations: Flow<PagingData<ConversationListItem>> =
+        combine(assistantIdFlow, _selectedFolderId, sortOrderFlow, teamIndex) { assistantId, folderId, sortOrder, index ->
+            ConversationListQuery(assistantId, folderId, sortOrder, index.memberConversationIds)
+        }
+            .flatMapLatest { (assistantId, folderId, sortOrder, hiddenConversationIds) ->
+                val paging = if (folderId == null) {
+                    conversationRepo.getUnfiledConversationsOfAssistantPaging(assistantId, sortOrder)
                 } else {
-                    conversationRepo.getConversationsOfFolderPaging(folderId)
+                    conversationRepo.getConversationsOfFolderPaging(folderId, sortOrder)
                 }
-            }
-            .map { pagingData ->
-                pagingData
-                    .map { ConversationListItem.Item(it) }
-                    .insertSeparators<ConversationListItem.Item, ConversationListItem> { before, after ->
-                        when {
-                            before == null && after is ConversationListItem.Item -> {
-                                if (after.conversation.isPinned) {
-                                    ConversationListItem.PinnedHeader
-                                } else {
-                                    val afterDate = after.conversation.updateAt
-                                        .atZone(ZoneId.systemDefault())
-                                        .toLocalDate()
-                                    ConversationListItem.DateHeader(
-                                        date = afterDate,
-                                        label = getDateLabel(afterDate)
-                                    )
+                paging.map { pagingData ->
+                    pagingData
+                        // 队友会话不混进主对话列表，只从 Lead 的团队视图进入
+                        .filter { conversation -> conversation.id !in hiddenConversationIds }
+                        .map { ConversationListItem.Item(it) }
+                        .insertSeparators<ConversationListItem.Item, ConversationListItem> { before, after ->
+                            when {
+                                after == null -> null
+                                after.conversation.isPinned -> {
+                                    if (before == null) ConversationListItem.PinnedHeader else null
                                 }
-                            }
 
-                            before is ConversationListItem.Item && after is ConversationListItem.Item -> {
-                                if (before.conversation.isPinned && !after.conversation.isPinned) {
-                                    val afterDate = after.conversation.updateAt
-                                        .atZone(ZoneId.systemDefault())
-                                        .toLocalDate()
-                                    ConversationListItem.DateHeader(
-                                        date = afterDate,
-                                        label = getDateLabel(afterDate)
-                                    )
-                                } else if (!after.conversation.isPinned) {
-                                    val beforeDate = before.conversation.updateAt
-                                        .atZone(ZoneId.systemDefault())
-                                        .toLocalDate()
-                                    val afterDate = after.conversation.updateAt
-                                        .atZone(ZoneId.systemDefault())
-                                        .toLocalDate()
-
-                                    if (beforeDate != afterDate) {
+                                else -> {
+                                    // 日期分组跟随排序依据：按创建时间排序时以创建日期分组
+                                    val afterDate = after.conversation.sortDate(sortOrder)
+                                    val sameGroup = before != null &&
+                                        !before.conversation.isPinned &&
+                                        before.conversation.sortDate(sortOrder) == afterDate
+                                    if (sameGroup) {
+                                        null
+                                    } else {
                                         ConversationListItem.DateHeader(
                                             date = afterDate,
-                                            label = getDateLabel(afterDate)
+                                            label = getDateLabel(afterDate),
+                                            sortOrder = sortOrder,
                                         )
-                                    } else {
-                                        null
                                     }
-                                } else {
-                                    null
                                 }
                             }
-
-                            else -> null
                         }
-                    }
+                }
             }
             .cachedIn(viewModelScope)
 
@@ -129,6 +158,14 @@ class ChatDrawerVM(
         viewModelScope.launch {
             assistantIdFlow.collect {
                 _selectedFolderId.value = null
+                _teamView.value = null
+            }
+        }
+
+        // 队友跑完一轮就刷新团队视图里的状态与最近消息
+        viewModelScope.launch {
+            chatService.generationDoneFlow.collect {
+                _teamView.value?.let { loadTeamView(it.leadConversationId) }
             }
         }
     }
@@ -140,6 +177,32 @@ class ChatDrawerVM(
 
     fun selectFolder(folderId: Uuid?) {
         _selectedFolderId.value = folderId
+        _teamView.value = null
+    }
+
+    /** 点 Lead 会话行右侧的箭头：进入该团队的会话列表 */
+    fun openTeam(leadConversationId: Uuid) {
+        viewModelScope.launch {
+            loadTeamView(leadConversationId)
+        }
+    }
+
+    fun closeTeam() {
+        _teamView.value = null
+    }
+
+    private suspend fun loadTeamView(leadConversationId: Uuid) {
+        val team = agentTeamRepository.getTeamByLeadConversation(leadConversationId)
+        if (team == null) {
+            _teamView.value = null
+            return
+        }
+        val lead = conversationRepo.getConversationById(leadConversationId)
+        _teamView.value = DrawerTeamView(
+            leadConversationId = leadConversationId,
+            title = lead?.title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.agent_team_title),
+            members = agentTeamService.listAgents(team.id),
+        )
     }
 
     fun createFolder(name: String) {
@@ -181,6 +244,14 @@ class ChatDrawerVM(
             // 经 ChatService 移动：活跃会话会先同步内存态，避免后续整对象保存覆盖 folder_id
             chatService.moveConversationToFolder(conversationId, folderId)
         }
+    }
+
+    private fun Conversation.sortDate(sortOrder: ConversationSortOrder): LocalDate {
+        val instant = when (sortOrder) {
+            ConversationSortOrder.UPDATE_TIME -> updateAt
+            ConversationSortOrder.CREATE_TIME -> createAt
+        }
+        return instant.atZone(ZoneId.systemDefault()).toLocalDate()
     }
 
     private fun getDateLabel(date: LocalDate): String {

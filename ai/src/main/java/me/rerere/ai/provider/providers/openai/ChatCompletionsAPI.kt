@@ -52,15 +52,17 @@ import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.configureSessionHeaders
 import me.rerere.ai.util.encodeBase64
+import me.rerere.ai.util.streamingJsonBody
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
+import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.parseErrorDetail
 import me.rerere.ai.util.stringSafe
-import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonArrayOrNull
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
+import me.rerere.common.http.sse.newEventSource
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -69,7 +71,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
-import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
 private const val TAG = "ChatCompletionsAPI"
@@ -92,14 +93,14 @@ class ChatCompletionsAPI(
 
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
+            .post(requestBody.streamingJsonBody())
             .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
             .configureReferHeaders(providerSetting.baseUrl)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "generateText: request prepared")
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
@@ -144,15 +145,15 @@ class ChatCompletionsAPI(
 
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
+            .post(requestBody.streamingJsonBody())
             .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamText: request prepared")
 
         // just for debugging response body
         // println(client.newCall(request).await().body?.string())
@@ -174,7 +175,7 @@ class ChatCompletionsAPI(
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: $data")
+                // Do not log streamed user/tool payloads: avoids logcat feedback and large transient strings.
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
@@ -199,7 +200,7 @@ class ChatCompletionsAPI(
                         Log.i(TAG, "onFailure: $exception")
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
+                    Log.w(TAG, "onFailure: error body parsing failed (${bodyRaw?.length ?: 0} chars)")
                     e.printStackTrace()
                     exception = e
                 } finally {
@@ -213,7 +214,7 @@ class ChatCompletionsAPI(
             }
         }
 
-        val eventSource = EventSources.createFactory(client).newEventSource(request, listener)
+        val eventSource = client.newEventSource(request, listener)
 
         awaitClose {
             println("[awaitClose] 关闭eventSource ")
@@ -284,9 +285,10 @@ class ChatCompletionsAPI(
 
                     "dashscope.aliyuncs.com" -> {
                         // 阿里云百炼
-                        // https://bailian.console.aliyun.com/console?tab=doc#/doc/?type=model&url=https%3A%2F%2Fhelp.aliyun.com%2Fdocument_detail%2F2870973.html&renderType=iframe
-                        put("enable_thinking", level.isEnabled)
-                        if (level != ReasoningLevel.AUTO) put("thinking_budget", level.budgetTokens)
+                        // https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions
+                        if (level != ReasoningLevel.AUTO) {
+                            put("reasoning_effort", level.effort)
+                        }
                     }
 
                     "ark.cn-beijing.volces.com" -> {
@@ -408,10 +410,8 @@ class ChatCompletionsAPI(
                     }
 
                     else -> {
-                        // OpenAI 官方
-                        // 文档中，completions API 只支持 "low", "medium", "high"
                         if (level != ReasoningLevel.AUTO) {
-                            put("reasoning_effort", if (level.effort == "none") "low" else level.effort)
+                            put("reasoning_effort", level.effort)
                         }
                     }
                 }

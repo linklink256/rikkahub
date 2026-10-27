@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -27,12 +28,13 @@ import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
-import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
+import me.rerere.ui.components.FormItem
 
 /**
  * 工具调用的渲染上下文, 预解析好工具入参与输出, 避免各渲染器重复解析
@@ -45,6 +47,8 @@ data class ToolUIContext(
     val content: JsonElement?,
     /** 该工具调用是否在生成中 */
     val loading: Boolean,
+    /** 发起该工具调用的助手, 拿不到时为 null */
+    val assistant: Assistant? = null,
 )
 
 /**
@@ -90,7 +94,6 @@ private object DefaultToolUIRenderer : ToolUIRenderer {
  */
 object ToolUIRegistry {
     private val renderers: Map<String, ToolUIRenderer> = listOf(
-        MemoryToolUI,
         SearchWebToolUI,
         ScrapeWebToolUI,
         GetTimeInfoToolUI,
@@ -99,6 +102,7 @@ object ToolUIRegistry {
         GetScreenTimeToolUI,
         CalendarQueryToolUI,
         CalendarCreateToolUI,
+        ChartDisplayToolUI,
         UseSkillToolUI,
         RecentChatsToolUI,
         ConversationSearchToolUI,
@@ -106,7 +110,7 @@ object ToolUIRegistry {
         ReadFileToolUI,
         WriteFileToolUI,
         ShellToolUI,
-    ).associateBy { it.toolName }
+    ).plus(MemoryFileToolUI.all).associateBy { it.toolName }
 
     /** 查找工具对应的渲染器, 未注册时返回默认渲染器 */
     fun resolve(toolName: String): ToolUIRenderer = renderers[toolName] ?: DefaultToolUIRenderer
@@ -149,8 +153,12 @@ fun DefaultToolPreview(
                 Text(stringResource(R.string.chat_message_tool_call_label, context.tool.toolName))
             }
         ) {
+            val argumentText = remember(context.arguments) {
+                val raw = context.arguments.toString()
+                if (raw.length > 16 * 1024) raw else JsonInstantPretty.encodeToString(context.arguments)
+            }
             HighlightCodeBlock(
-                code = JsonInstantPretty.encodeToString(context.arguments),
+                code = argumentText,
                 language = "json",
                 style = TextStyle(fontSize = 10.sp, lineHeight = 12.sp)
             )
@@ -164,15 +172,19 @@ fun DefaultToolPreview(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     context.tool.output.fastForEach { part ->
                         when (part) {
-                            is UIMessagePart.Text -> HighlightCodeBlock(
-                                code = runCatching {
-                                    JsonInstantPretty.encodeToString(
-                                        JsonInstant.parseToJsonElement(part.text)
-                                    )
-                                }.getOrElse { part.text },
-                                language = "json",
-                                style = TextStyle(fontSize = 10.sp, lineHeight = 12.sp)
-                            )
+                            is UIMessagePart.Text -> {
+                                // Formatting is optional. Never build a full JSON tree/pretty copy for huge tool output.
+                                val display = remember(part.text) {
+                                    if (part.text.length > 16 * 1024) part.text else runCatching {
+                                        JsonInstantPretty.encodeToString(JsonInstant.parseToJsonElement(part.text))
+                                    }.getOrElse { part.text }
+                                }
+                                HighlightCodeBlock(
+                                    code = display,
+                                    language = "json",
+                                    style = TextStyle(fontSize = 10.sp, lineHeight = 12.sp)
+                                )
+                            }
 
                             is UIMessagePart.Image -> ZoomableAsyncImage(
                                 model = part.url,

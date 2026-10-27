@@ -9,8 +9,8 @@ import kotlinx.coroutines.channels.onFailure
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -33,26 +33,29 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.core.merge
+import me.rerere.ai.core.sum
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.ClaudePromptCacheTtl
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.Provider
+import me.rerere.ai.provider.ProviderQuota
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.providers.PartGroup
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
+import me.rerere.ai.provider.runQuotaQuery
 import me.rerere.ai.provider.stream.SseEvent
-import me.rerere.ai.ui.ImageGenerationItem
-import me.rerere.ai.ui.StreamChunk
-import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.ClaudeReasoningMetadata
+import me.rerere.ai.ui.ImageGenerationItem
 import me.rerere.ai.ui.ServerToolMetadata
 import me.rerere.ai.ui.ServerToolProtocol
 import me.rerere.ai.ui.ServerToolStatus
+import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.StreamChunkHandler
+import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.handleTextGenerationResult
 import me.rerere.ai.ui.metadataAs
@@ -61,13 +64,15 @@ import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.configureSessionHeaders
 import me.rerere.ai.util.encodeBase64
+import me.rerere.ai.util.streamingJsonBody
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
+import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.parseErrorDetail
 import me.rerere.ai.util.stringSafe
-import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonPrimitiveOrNull
+import me.rerere.common.http.sse.newEventSource
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -75,7 +80,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
-import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
 private const val TAG = "ClaudeProvider"
@@ -230,24 +234,19 @@ private fun StreamChunk.maxClaudeServerToolIndex(): Int? {
 
 private fun ServerToolMetadata.maxIndex(): Int? = listOfNotNull(callIndex, resultIndex).maxOrNull()
 
-private fun TokenUsage?.sum(other: TokenUsage?): TokenUsage? {
-    if (this == null) return other
-    if (other == null) return this
-    return TokenUsage(
-        promptTokens = promptTokens + other.promptTokens,
-        completionTokens = completionTokens + other.completionTokens,
-        cachedTokens = cachedTokens + other.cachedTokens,
-        totalTokens = totalTokens + other.totalTokens,
-    )
-}
-
 class ClaudeProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Claude> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
+
+    override suspend fun getQuota(providerSetting: ProviderSetting.Claude): ProviderQuota? =
+        client.runQuotaQuery(providerSetting) {
+            keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+        }
 
     override suspend fun listModels(providerSetting: ProviderSetting.Claude): List<Model> =
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
                 .url("${providerSetting.baseUrl}/models")
+                .headers(providerSetting.mergeCustomHeaders())
                 .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
                 .addHeader("anthropic-version", ANTHROPIC_VERSION)
                 .get()
@@ -299,15 +298,15 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         val requestBody = buildMessageRequest(providerSetting, messages, params)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/messages")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
+            .post(requestBody.streamingJsonBody())
             .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
             .addHeader("anthropic-version", ANTHROPIC_VERSION)
             .configureReferHeaders(providerSetting.baseUrl)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "generateText: request prepared")
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
@@ -349,8 +348,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         val requestBody = buildMessageRequest(providerSetting, messages, params, stream = true)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/messages")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
+            .post(requestBody.streamingJsonBody())
             .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
             .addHeader("anthropic-version", ANTHROPIC_VERSION)
             .addHeader("Content-Type", "application/json")
@@ -358,7 +357,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamText: request prepared")
 
         requestBody["messages"]!!.jsonArray.forEach {
             Log.i(TAG, "streamText: $it")
@@ -381,7 +380,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: type=$type, data=$data")
+                // No raw SSE payload logging.
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
@@ -401,11 +400,11 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 try {
                     if (!bodyRaw.isNullOrBlank()) {
                         val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        Log.i(TAG, "Error response: $bodyElement")
+                        Log.i(TAG, "Error response received")
                         exception = bodyElement.parseErrorDetail()
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
+                    Log.w(TAG, "onFailure: error body parsing failed (${bodyRaw?.length ?: 0} chars)")
                     e.printStackTrace()
                 } finally {
                     close(exception)
@@ -418,8 +417,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             }
         }
 
-        val eventSource = EventSources.createFactory(client)
-            .newEventSource(request, listener)
+        val eventSource = client.newEventSource(request, listener)
 
         awaitClose {
             Log.d(TAG, "Closing eventSource")
@@ -447,10 +445,12 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 put("cache_control", cacheControlEphemeral(providerSetting.promptCacheTtl))
             }
 
-            if (params.temperature != null && !params.reasoningLevel.isEnabled) put(
-                "temperature",
-                params.temperature
-            )
+            if (params.temperature != null && !params.reasoningLevel.isEnabled) {
+                put(
+                    "temperature",
+                    params.temperature
+                )
+            }
             if (params.topP != null) put("top_p", params.topP)
 
             put("stream", stream)
@@ -521,7 +521,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         })
                         BuiltInTools.UrlContext,
                         BuiltInTools.ImageGeneration,
-                            -> Unit
+                        -> Unit
                     }
                 }
             }
@@ -583,13 +583,17 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     it.jsonObject["type"]?.jsonPrimitive?.contentOrNull == "tool_result"
                 } == true
                 if (!isToolResult) index else null
-            } else null
+            } else {
+                null
+            }
         }
 
         // 取倒数第二条
         val targetIndex = if (realUserIndices.size >= 2) {
             realUserIndices[realUserIndices.size - 2]
-        } else return messages
+        } else {
+            return messages
+        }
 
         // 在目标 message 的最后一个 content block 上添加 cache_control
         return JsonArray(messages.mapIndexed { index, msg ->
@@ -601,10 +605,14 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         JsonObject(
                             block.jsonObject + mapOf("cache_control" to cacheControlEphemeral(promptCacheTtl))
                         )
-                    } else block
+                    } else {
+                        block
+                    }
                 })
                 JsonObject(obj + mapOf("content" to newContent))
-            } else msg
+            } else {
+                msg
+            }
         })
     }
 
@@ -710,11 +718,11 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             add(rawCall?.let {
                 if (input == null) it else JsonObject(it + mapOf("input" to input))
             } ?: buildJsonObject {
-                    put("type", "server_tool_use")
-                    put("id", toolCallId)
-                    put("name", toolName)
-                    input?.let { put("input", it) }
-                })
+                put("type", "server_tool_use")
+                put("id", toolCallId)
+                put("name", toolName)
+                input?.let { put("input", it) }
+            })
             val rawResult = metadata?.result.takeIf { protocol == ServerToolProtocol.ANTHROPIC_MESSAGES }
             if (isFinished && (output != null || rawResult != null)) {
                 add(rawResult ?: buildJsonObject {

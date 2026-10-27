@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Forward02
 import me.rerere.hugeicons.stroke.Pin
@@ -27,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,8 +53,10 @@ import androidx.compose.ui.unit.dp
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemKey
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.ui.theme.extendColors
+import me.rerere.rikkahub.utils.mirrorForRtl
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDate
 import java.time.ZoneId
@@ -64,7 +68,8 @@ import kotlin.uuid.Uuid
 sealed class ConversationListItem {
     data class DateHeader(
         val date: LocalDate,
-        val label: String
+        val label: String,
+        val sortOrder: ConversationSortOrder = ConversationSortOrder.UPDATE_TIME,
     ) : ConversationListItem()
     data object PinnedHeader : ConversationListItem()
     data class Item(
@@ -79,21 +84,28 @@ fun ColumnScope.ConversationList(
     conversationJobs: Collection<Uuid>,
     listState: LazyListState,
     modifier: Modifier = Modifier,
+    header: (@Composable () -> Unit)? = null,
     onClick: (Conversation) -> Unit = {},
     onDelete: (Conversation) -> Unit = {},
     onRegenerateTitle: (Conversation) -> Unit = {},
     onPin: (Conversation) -> Unit = {},
     onMoveToAssistant: (Conversation) -> Unit = {},
-    onMoveToFolder: (Conversation) -> Unit = {}
+    onMoveToFolder: (Conversation) -> Unit = {},
+    // 团队：Lead 会话行右侧显示箭头，点它进入该团队的会话列表
+    teamLeadIds: Set<Uuid> = emptySet(),
+    onOpenTeam: (Conversation) -> Unit = {},
 ) {
     var hasScrolledToCurrent by remember(current.id) { mutableStateOf(false) }
+    // 列表顶部若放了 header，会话项在 LazyColumn 中的位置要往后挪一位
+    val headerCount = if (header != null) 1 else 0
 
     LaunchedEffect(current.id, conversations.itemCount, hasScrolledToCurrent) {
         if (hasScrolledToCurrent) return@LaunchedEffect
-        val currentIndex = conversations.itemSnapshotList.items.indexOfFirst {
+        val itemIndex = conversations.itemSnapshotList.items.indexOfFirst {
             (it as? ConversationListItem.Item)?.conversation?.id == current.id
         }
-        if (currentIndex >= 0) {
+        if (itemIndex >= 0) {
+            val currentIndex = itemIndex + headerCount
             val isVisible = listState.layoutInfo.visibleItemsInfo.any { it.index == currentIndex }
             if (!isVisible) {
                 listState.scrollToItem(currentIndex)
@@ -107,6 +119,12 @@ fun ColumnScope.ConversationList(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (header != null) {
+            item(key = "header", contentType = "header") {
+                header()
+            }
+        }
+
         if (conversations.itemCount == 0) {
             item {
                 Surface(
@@ -130,7 +148,8 @@ fun ColumnScope.ConversationList(
             count = conversations.itemCount,
             key = conversations.itemKey { item ->
                 when (item) {
-                    is ConversationListItem.DateHeader -> "date_${item.date}"
+                    // key 带上排序方式，避免切换排序后列表锚定到另一种排序下的同日期分组而发生跳动
+                    is ConversationListItem.DateHeader -> "date_${item.sortOrder}_${item.date}"
                     is ConversationListItem.PinnedHeader -> "pinned_header"
                     is ConversationListItem.Item -> item.conversation.id.toString()
                 }
@@ -161,6 +180,8 @@ fun ColumnScope.ConversationList(
                         onPin = onPin,
                         onMoveToAssistant = onMoveToAssistant,
                         onMoveToFolder = onMoveToFolder,
+                        isTeamLead = item.conversation.id in teamLeadIds,
+                        onOpenTeam = onOpenTeam,
                         modifier = Modifier.animateItem()
                     )
                 }
@@ -232,6 +253,8 @@ private fun ConversationItem(
     onPin: (Conversation) -> Unit = {},
     onMoveToAssistant: (Conversation) -> Unit = {},
     onMoveToFolder: (Conversation) -> Unit = {},
+    isTeamLead: Boolean = false,
+    onOpenTeam: (Conversation) -> Unit = {},
     onClick: (Conversation) -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -292,6 +315,22 @@ private fun ConversationItem(
                         }
                 )
             }
+
+            // 团队入口：进入该 Lead 会话的队友列表
+            if (isTeamLead) {
+                IconButton(
+                    onClick = { onOpenTeam(conversation) },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.ArrowRight01,
+                        contentDescription = stringResource(R.string.agent_team_open_team),
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             DropdownMenu(
                 expanded = showDropdownMenu,
                 onDismissRequest = { showDropdownMenu = false },
@@ -336,7 +375,7 @@ private fun ConversationItem(
                         showDropdownMenu = false
                     },
                     leadingIcon = {
-                        Icon(HugeIcons.Forward02, null)
+                        Icon(HugeIcons.Forward02, null, modifier = Modifier.mirrorForRtl())
                     }
                 )
 
