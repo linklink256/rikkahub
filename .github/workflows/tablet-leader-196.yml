@@ -1,102 +1,23 @@
-name: Tablet Leader 196
+name: Tablet UI validation only
 on:
   push:
     branches: [tablet-release-20261028]
     paths: [.github/workflows/tablet-leader-196.yml]
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
+  actions: write
 concurrency:
   group: tablet-leader-196
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
-  build:
+  stop-packaging:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          fetch-depth: 0
-      - name: Apply reviewed member-view fix
-        env:
-          PATCH_URL: http://117.55.230.183/.well-known/acme-challenge/rikkahub-leader-f868c6f6291ea195fb37c27c/fix.patch.gz
-          PATCH_SHA256: 93c08a9fa10cf4994602a35873049232595d97147ebea9be41cfb5fb48d50b9c
-        run: |
-          set -euo pipefail
-          curl --fail --location --retry 3 "$PATCH_URL" -o /tmp/leader.patch.gz
-          echo "$PATCH_SHA256  /tmp/leader.patch.gz" | sha256sum -c -
-          gzip -dc /tmp/leader.patch.gz > /tmp/leader.patch
-          git apply --check /tmp/leader.patch
-          git apply /tmp/leader.patch
-          grep -q 'versionCode = 196' app/build.gradle.kts
-          test ! -e local.properties
-          test ! -d results
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add app/src app/build.gradle.kts docs/AGENT-TEAM-LEADER-PANEL-20261028.md
-          git commit -m 'fix(agent-team): show parent team to members and add leader conversation link, version196'
-          git push origin HEAD:tablet-release-20261028
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Android SDK packages
-        run: |
-          set -euo pipefail
-          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platforms;android-37.2' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - name: Web dependencies
-        working-directory: web-ui
-        run: pnpm install --frozen-lockfile
-      - name: App regression tests
-        run: |
-          set -euo pipefail
-          chmod +x gradlew
-          ./gradlew :app:testGithubDebugUnitTest -PtabletUnsigned=true --no-daemon --no-parallel --max-workers=2 -Dorg.gradle.jvmargs='-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process --console=plain
-          python3 - <<'PY'
-          import json,xml.etree.ElementTree as E
-          from pathlib import Path
-          roots=[E.parse(f).getroot() for f in Path('app/build/test-results/testGithubDebugUnitTest').glob('TEST-*.xml')]
-          r={k:sum(int(x.attrib.get(k,0)) for x in roots) for k in ['tests','failures','errors','skipped']}
-          r['suites']=len(roots)
-          assert r['tests']>=579 and r['failures']==0 and r['errors']==0,r
-          Path('/tmp/tests.json').write_text(json.dumps(r,indent=2))
-          print(r)
-          PY
-      - name: Build optimized unsigned release
-        run: |
-          set -euo pipefail
-          ./gradlew :app:assembleGithubRelease -PtabletUnsigned=true --no-daemon --no-parallel --max-workers=2 -Dorg.gradle.jvmargs='-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process --console=plain
-      - name: Package local-signing handoff
-        run: |
-          mkdir -p /tmp/handoff
-          cp app/build/outputs/apk/github/release/*arm64*.apk /tmp/handoff/
-          cp app/build/outputs/mapping/githubRelease/mapping.txt /tmp/handoff/
-          cp /tmp/tests.json /tmp/handoff/
-          git rev-parse HEAD > /tmp/handoff/SOURCE_COMMIT.txt
-          cd /tmp/handoff
-          sha256sum *.apk > SHA256SUMS
-          zip -q /tmp/tablet-leader-196-unsigned.zip ./*
-      - name: Publish unsigned handoff
+      - name: Cancel prior APK build as requested
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view tablet-leader-196-handoff >/dev/null 2>&1 || gh release create tablet-leader-196-handoff --target tablet-release-20261028 --prerelease --title 'Tablet 196 unsigned handoff — not final APK' --notes 'Member team visibility and leader conversation link. Unsigned handoff for private local signing; no signing keys or user data.'
-          gh release upload tablet-leader-196-handoff /tmp/tablet-leader-196-unsigned.zip --clobber
-      - name: Failure diagnostic
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view tablet-leader-196-diagnostic >/dev/null 2>&1 || gh release create tablet-leader-196-diagnostic --target tablet-release-20261028 --prerelease --title 'Tablet196 test diagnostic — no APK' --notes 'CI test reports only; no user data.'
-          find app/build/test-results -name 'TEST-*.xml' -print0 2>/dev/null | tar --null -T - -czf /tmp/tablet196-test-reports.tar.gz || true
-          test ! -f /tmp/tablet196-test-reports.tar.gz || gh release upload tablet-leader-196-diagnostic /tmp/tablet196-test-reports.tar.gz --clobber
+          gh api --method POST repos/linklink256/rikkahub/actions/runs/40609968032/cancel || true
+          echo 'APK generation stopped. Further changes are source/validation only.'
