@@ -20,8 +20,8 @@ jobs:
           fetch-depth: 0
       - name: Apply audited title-list fix
         env:
-          PATCH_URL: http://117.55.230.183/.well-known/acme-challenge/rikkahub-titles-a9df37e099fd21ac7c98555b/titles.patch.gz
-          PATCH_SHA256: 8a4cba25ab1b04071143651dd98abf3c61ddc0cbfdba3e509640c2f456af20d66
+          PATCH_URL: http://117.55.230.183/.well-known/acme-challenge/rikkahub-titles-1a8be226a96ec32d7677aa8f/titles.patch.gz
+          PATCH_SHA256: 64dcf313fe318d93f20f24f1f0ecf19d8c809eca3b517445917bae88631b731f
         run: |
           set -euo pipefail
           curl --fail --location --retry 3 "$PATCH_URL" -o /tmp/titles.patch.gz
